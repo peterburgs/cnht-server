@@ -1,0 +1,33 @@
+{
+  "name": "cnht",
+  "version": "1.0.0",
+  "description": "Server of CungNhauHocToan web application",
+  "main": "./dist/app.js",
+  "dependencies": {
+    "@types/cors": "^2.8.10",
+    "@types/express": "^4.17.12",
+    "@types/morgan": "^1.9.2",
+    "cors": "^2.8.5",
+    "dotenv": "^10.0.0",
+    "express": "^4.17.1",
+    "morgan": "^1.10.0",
+    "mysql2": "^2.2.5",
+    "nodemon": "^2.0.9",
+    "sequelize": "^6.6.4"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon ./dist/app.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peterburgs/cnht-server.git"
+  },
+  "author": "Peter Burgs",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/peterburgs/cnht-server/issues"
+  },
+  "homepage": "https://github.com/peterburgs/cnht-server#readme"
+}
