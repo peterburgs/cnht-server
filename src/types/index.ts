@@ -50,11 +50,11 @@ export interface Section {
   createdAt: Date;
   updatedAt: Date;
 }
-export interface Section {
+export interface Lecture {
   id: string;
   title: string;
-  courseId: string;
-  sectionOrder: number;
+  sectionId: string;
+  lectureOrder: number;
   isHidden: boolean;
   createdAt: Date;
   updatedAt: Date;

@@ -4,35 +4,36 @@ import { ROLES } from "../types";
 import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
-import Section from "../models/section";
+import Lecture from "../models/lecture";
+
 // Define router
 const router: Router = express.Router();
 
-// POST method: create new section
+// POST method: create new lecture
 router.post(
   "/",
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        const section = await Section.create({
+        const lecture = await Lecture.create({
           title: req.body.title,
-          courseId: req.body.courseId,
-          sectionOrder: req.body.sectionOrder,
+          sectionId: req.body.sectionId,
+          lectureOrder: req.body.lectureOrder,
           isHidden: req.body.isHidden,
         });
-        if (section) {
-          await section.reload();
+        if (lecture) {
+          await lecture.reload();
           res.status(201).json({
-            message: log("Create new section successfully"),
+            message: log("Create new lecture successfully"),
             count: 1,
-            section: section,
+            lecture: lecture,
           });
         } else {
           res.status(500).json({
-            message: log("Cannot create section"),
+            message: log("Cannot create lecture"),
             count: 0,
-            section: null,
+            lecture: null,
           });
         }
       } catch (error) {
@@ -40,14 +41,14 @@ router.post(
         res.status(500).json({
           message: log(error.message),
           count: 0,
-          section: null,
+          lecture: null,
         });
       }
     });
   }
 );
 
-// GET method: get sections by filters
+// GET method: get lectures by filters
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Create filter from request query
@@ -57,35 +58,35 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     }
 
     // Find course from filter
-    const sections = await Section.findAll({
+    const lectures = await Lecture.findAll({
       where: {
         isHidden: false,
         [Op.and]: reqParams,
       },
     });
-    if (sections.length) {
+    if (lectures.length) {
       res.status(200).json({
-        message: log("Sections found"),
-        count: sections.length,
-        sections: sections,
+        message: log("Lectures found"),
+        count: lectures.length,
+        lectures: lectures,
       });
     } else {
       res.status(404).json({
-        message: log("No sections found"),
+        message: log("No lectures found"),
         count: 0,
-        sections: [],
+        lectures: [],
       });
     }
   } catch (error) {
     console.log(error.message);
     res.status(500).json({
-      message: log("No sections found"),
+      message: log("No lectures found"),
       count: 0,
-      sections: [],
+      lectures: [],
     });
   }
 });
-// PUT method: update a section by PK
+// PUT method: update a lecture by PK
 
 router.put(
   "/:id",
@@ -93,28 +94,28 @@ router.put(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        // Find section by id
-        let section = await Section.findByPk(req.params.id);
-        if (section) {
+        // Find lecture by id
+        let lecture = await Lecture.findByPk(req.params.id);
+        if (lecture) {
           // Update
-          section.title = req.body.title;
-          section.courseId = req.body.courseId;
-          section.sectionOrder = req.body.sectionOrder;
-          section.isHidden = req.body.isHidden;
+          lecture.title = req.body.title;
+          lecture.sectionId = req.body.sectionId;
+          lecture.lectureOrder = req.body.lectureOrder;
+          lecture.isHidden = req.body.isHidden;
           // Save
-          await section.save();
+          await lecture.save();
           // Refresh from database
-          await section.reload();
+          await lecture.reload();
           res.status(200).json({
-            message: log("Update section successfully"),
+            message: log("Update lecture successfully"),
             count: 1,
-            section: section,
+            lecture: lecture,
           });
         } else {
           res.status(404).json({
-            message: log("Section not found"),
+            message: log("lecture not found"),
             count: 0,
-            section: null,
+            lecture: null,
           });
         }
       } catch (error) {
@@ -122,35 +123,35 @@ router.put(
         res.status(500).json({
           message: log(error.message),
           count: 0,
-          section: null,
+          lecture: null,
         });
       }
     });
   }
 );
 
-// DELETE method: delete a section
+// DELETE method: delete a lecture
 router.delete(
   "/:id",
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        // Find section by id
-        let section = await Section.findByPk(req.params.id);
-        if (section) {
+        // Find lecture by id
+        let lecture = await Lecture.findByPk(req.params.id);
+        if (lecture) {
           // Mark as hidden
-          section.isHidden = true;
+          lecture.isHidden = true;
           // Save
-          await section.save();
+          await lecture.save();
           // Refresh from database
-          await section.reload();
+          await lecture.reload();
           res.status(200).json({
-            message: log("Delete section successfully"),
+            message: log("Delete lecture successfully"),
           });
         } else {
           res.status(404).json({
-            message: log("Section not found"),
+            message: log("lecture not found"),
           });
         }
       } catch (error) {
