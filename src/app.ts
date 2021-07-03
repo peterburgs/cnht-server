@@ -15,6 +15,8 @@ global.sequelize = sequelize;
 import userRoutes from "./routes/userRoutes";
 import authRoutes from "./routes/authRoutes";
 import courseRoutes from "./routes/courseRoutes";
+import sectionRoutes from "./routes/sectionRoutes";
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -51,6 +53,8 @@ app.get(`${API_URL}`, (req: Request, res: Response) => {
 app.use("/api/users", userRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/courses", courseRoutes);
+app.use("/api/sections", sectionRoutes);
+
 // Handle 404 error
 app.use((req: Request, res: Response, next: NextFunction) => {
   const error: NodeJS.ErrnoException = new Error("Page Not Found!");
