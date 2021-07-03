@@ -41,3 +41,21 @@ export interface Course {
   createdAt: Date;
   updatedAt: Date;
 }
+export interface Section {
+  id: string;
+  title: string;
+  courseId: string;
+  sectionOrder: number;
+  isHidden: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+export interface Section {
+  id: string;
+  title: string;
+  courseId: string;
+  sectionOrder: number;
+  isHidden: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
