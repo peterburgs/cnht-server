@@ -4,20 +4,23 @@
     "password": "V^ayN=8/)*g5a:f^*iP{}3wA#;6uK45[>",
     "database": "cnht",
     "host": "34.87.77.6",
-    "dialect": "mysql"
+    "dialect": "mysql",
+    "timezone": "+07:00"
   },
   "test": {
     "username": "root",
     "password": "V^ayN=8/)*g5a:f^*iP{}3wA#;6uK45[>",
     "database": "cnht",
     "host": "34.87.77.6",
-    "dialect": "mysql"
+    "dialect": "mysql",
+    "timezone": "+07:00"
   },
   "production": {
     "username": "root",
     "password": "V^ayN=8/)*g5a:f^*iP{}3wA#;6uK45[>",
     "database": "cnht",
     "host": "34.87.77.6",
-    "dialect": "mysql"
+    "dialect": "mysql",
+    "timezone": "+07:00"
   }
 }

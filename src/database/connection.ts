@@ -1,5 +1,6 @@
 import { Sequelize } from "sequelize";
 import { log } from "../utils/index";
+import moment from "moment";
 
 // Sequelize connection instance
 const sequelize = new Sequelize(
@@ -9,6 +10,11 @@ const sequelize = new Sequelize(
   {
     dialect: "mysql",
     host: process.env.DB_HOST,
+    dialectOptions: {
+      dateStrings: true,
+      typeCast: true,
+    },
+    timezone: "+07:00",
   }
 );
 const verifyConnection = async () => {

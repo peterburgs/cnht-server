@@ -11,7 +11,10 @@ const API_URL = process.env.API_URL;
 // Connect to MySQL
 import sequelize from "./database/connection";
 global.sequelize = sequelize;
-
+// Import Routes
+import userRoutes from "./routes/userRoutes";
+import authRoutes from "./routes/authRoutes";
+import courseRoutes from "./routes/courseRoutes";
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -22,6 +25,7 @@ app.use(
 // Prevent CORS errors
 app.use(cors());
 // Handle header
+
 app.use((req: Request, res: Response, next: NextFunction) => {
   res.header(
     "Access-Control-Allow-Headers",
@@ -44,7 +48,9 @@ app.get(`${API_URL}`, (req: Request, res: Response) => {
     message: "Welcome to cungnhauhoctoan.net",
   });
 });
-
+app.use("/api/users", userRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/courses", courseRoutes);
 // Handle 404 error
 app.use((req: Request, res: Response, next: NextFunction) => {
   const error: NodeJS.ErrnoException = new Error("Page Not Found!");
