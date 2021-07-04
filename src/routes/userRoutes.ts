@@ -31,7 +31,6 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
         // Find user from filter
         const users = await User.findAll({
           where: {
-            isHidden: false,
             [Op.and]: reqParams,
           },
         });
