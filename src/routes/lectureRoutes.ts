@@ -4,11 +4,18 @@ import { ROLES } from "../types";
 import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
-import Lecture from "../models/lecture";
 import Video from "../models/video";
+import Enrollment from "../models/enrollment";
+import Course from "../models/course";
+import Section from "../models/section";
+import Lecture from "../models/lecture";
+import User from "../models/user";
 import { v4 as uuidv4 } from "uuid";
 import fs from "fs";
 import AWS from "aws-sdk";
+import { auth, OAuth2Client } from "google-auth-library";
+
+const client = new OAuth2Client(process.env.CLIENT_ID);
 
 // Config multer
 import multer from "multer";
@@ -159,8 +166,8 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     });
   }
 });
-// PUT method: update a lecture by PK
 
+// PUT method: update a lecture by PK
 router.put(
   "/:id",
   upload.single("video"),
@@ -294,5 +301,113 @@ router.delete(
     });
   }
 );
+
+// Verify token
+const googleAuth = async (token: string) => {
+  const ticket = await client.verifyIdToken({
+    idToken: token,
+    audience: process.env.CLIENT_ID!,
+  });
+  return ticket.getPayload();
+};
+
+// GET method: stream video from wasabi
+router.get("/:lectureId/streaming", async (req, res, next) => {
+  try {
+    const token =
+      req.query
+        .RGhqHqXSZfjAiyXgzznYnHSKRvxiHBWvzLZFZTUxXhRjvqsagFwHzfXuQPWcTQALWHqGKUPBFmuLWmKavtRvBWriLgXWtCAuDrsukwgTBQfuPVOiSeWtLbNTgSjtgYtICvCzYSmxwIXGeurxyOcGlrjvcDaAIsDIBDziWipcZbBPVUlzwhnpvjPrVHghlOppHdRUxctaGRUcBQXUJutPBhNSzebikzpytuIADtOEswqcJxZsBvkwvDayDXrofHfpxOrYzTXLSvZTkXodWNimYNiTAlFywOcRFMFSaNYOQAsxsHiDFxnvwFHkwMivNjJqAalJaUqmUDHkrWnGWnPLEZogCTwQSbnTEZIIZEHoCdxWftJaddNbreSHUVlPhLTWSAcmdwkgCDASTRLGjClarTYPmTZppYyKJcCmQyKmmFFFvhFsSZevKWKCGcQVUmnbPKiIXGQWyUieQZEgBhqlJhbKkzmMoWZPzsioovcdmKBQNRRHKfBtnaROdYhrXaeA;
+    if (token) {
+      const decodedUser = await googleAuth(token as string);
+      const user = await User.findOne({
+        where: {
+          email: decodedUser?.email,
+        },
+      });
+      const lecture = await Lecture.findOne({
+        where: {
+          isHidden: false,
+          id: req.params.lectureId,
+        },
+      });
+      const section = await Section.findOne({
+        where: {
+          id: lecture?.sectionId,
+        },
+      });
+      const enrollments = await Enrollment.findAll({
+        where: {
+          courseId: section?.courseId,
+          learnerId: user?.id,
+        },
+      });
+      const video = await Video.findOne({
+        where: {
+          lectureId: req.params.lectureId,
+        },
+      });
+      if (enrollments.length) {
+        const extension = video?.fileName.split(".")[1];
+
+        const metaDataParams = {
+          Bucket: "cnht-main-bucket",
+          Key: video?.id + "." + extension,
+        };
+        const range = req.headers.range;
+        const metaData = await s3.headObject(metaDataParams).promise();
+        const fileSize = metaData.ContentLength;
+
+        if (range) {
+          const parts = range.replace(/bytes=/, "").split("-");
+          const start = parseInt(parts[0], 10);
+          const end = parts[1] ? parseInt(parts[1], 10) : fileSize! - 1;
+          const chunksize = end - start + 1;
+
+          const head = {
+            "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+            "Accept-Ranges": "bytes",
+            "Content-Length": chunksize,
+            "Content-Type": "video/mp4",
+          };
+          const streamParams = {
+            Bucket: "cnht-main-bucket",
+            Key: video?.id + "." + extension,
+            Range: range,
+          };
+
+          res.writeHead(206, head);
+          return s3.getObject(streamParams).createReadStream().pipe(res);
+        } else {
+          const head = {
+            "Content-Length": fileSize,
+            "Content-Type": "video/mp4",
+          };
+          res.writeHead(200, head);
+          const streamParams = {
+            Bucket: "cnht-main-bucket",
+            Key: video?.id + "." + extension,
+          };
+          return s3.getObject(streamParams).createReadStream().pipe(res);
+        }
+      }
+      // Learner not purchase
+      else {
+        res.status(404).json({
+          message: log("Learner not purchase yet"),
+        });
+      }
+    } // If client does not send token
+    else {
+      res.status(401).json({
+        message: log("Permission denied"),
+      });
+    }
+  } catch (error) {
+    log(error.message);
+    res.status(500).json({
+      message: log(error.message),
+    });
+  }
+});
 
 export default router;
