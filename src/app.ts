@@ -30,7 +30,6 @@ import enrollmentRoutes from "./routes/enrollmentRoutes";
 import commentRoutes from "./routes/commentRoutes";
 import depositRequestRoutes from "./routes/depositRequestRoutes";
 import imageRoutes from "./routes/imageRoutes";
-import videoRoutes from "./routes/videoRoutes";
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -73,7 +72,6 @@ app.use("/api/enrollments", enrollmentRoutes);
 app.use("/api/comments", commentRoutes);
 app.use("/api/deposit-requests", depositRequestRoutes);
 app.use("/api/images", imageRoutes);
-app.use("/api/videos", videoRoutes);
 
 // Handle 404 error
 app.use((req: Request, res: Response, next: NextFunction) => {
