@@ -5,6 +5,19 @@ import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import Lecture from "../models/lecture";
+import Video from "../models/video";
+import { v4 as uuidv4 } from "uuid";
+import fs from "fs";
+import AWS from "aws-sdk";
+
+// Config multer
+import multer from "multer";
+const upload = multer({
+  dest: "../assets/videos",
+});
+// Config aws
+const ep = new AWS.Endpoint("s3.wasabisys.com");
+const s3 = new AWS.S3({ endpoint: ep });
 
 // Define router
 const router: Router = express.Router();
@@ -12,6 +25,7 @@ const router: Router = express.Router();
 // POST method: create new lecture
 router.post(
   "/",
+  upload.single("video"),
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
@@ -20,20 +34,78 @@ router.post(
           title: req.body.title,
           sectionId: req.body.sectionId,
           lectureOrder: req.body.lectureOrder,
-          isHidden: req.body.isHidden,
+          isHidden: false,
         });
         if (lecture) {
           await lecture.reload();
-          res.status(201).json({
-            message: log("Create new lecture successfully"),
-            count: 1,
-            lecture: lecture,
-          });
+          // res.status(201).json({
+          //   message: log("Create new lecture successfully"),
+          //   count: 1,
+          //   lecture: lecture,
+          // });
+          if (req.file) {
+            try {
+              const _id = uuidv4();
+              const extension = req.file.originalname.split(".")[1];
+              const fileName = req.file.originalname.split(".")[0];
+              // Config params
+              const params = {
+                Bucket: "cnht-main-bucket",
+                Body: fs.createReadStream(req.file.path),
+                Key: _id + "." + extension,
+              };
+              // Upload to S3
+              await s3.putObject(params).promise();
+              fs.unlinkSync(req.file.path);
+
+              // Get video info from cloud
+
+              const video = await Video.create({
+                id: _id,
+                fileName: fileName + "." + extension,
+                length: req.body.length,
+                lectureId: lecture.id,
+                isHidden: false,
+              });
+              if (video) {
+                await video.reload();
+                res.status(201).json({
+                  message: log("Create new video successfully"),
+                  count: 1,
+                  video: video,
+                  lecture: lecture,
+                });
+              } else {
+                res.status(500).json({
+                  message: log("Cannot create new video"),
+                  count: 0,
+                  video: null,
+                  lecture: null,
+                });
+              }
+            } catch (error) {
+              log(error.message);
+              res.status(500).json({
+                message: log(error.message),
+                count: 0,
+                video: null,
+                lecture: null,
+              });
+            }
+          } else {
+            res.status(404).json({
+              message: log("Video not found"),
+              count: 0,
+              video: null,
+              lecture: null,
+            });
+          }
         } else {
           res.status(500).json({
             message: log("Cannot create lecture"),
             count: 0,
             lecture: null,
+            video: null,
           });
         }
       } catch (error) {
@@ -42,6 +114,7 @@ router.post(
           message: log(error.message),
           count: 0,
           lecture: null,
+          video: null,
         });
       }
     });
@@ -90,6 +163,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
 
 router.put(
   "/:id",
+  upload.single("video"),
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
@@ -106,11 +180,68 @@ router.put(
           await lecture.save();
           // Refresh from database
           await lecture.reload();
-          res.status(200).json({
-            message: log("Update lecture successfully"),
-            count: 1,
-            lecture: lecture,
-          });
+
+          // Handle admin update video
+          if (req.file) {
+            // find video in database
+            const currentVideo = await Video.findOne({
+              where: {
+                isHidden: false,
+                lectureId: lecture.id,
+              },
+            });
+            if (currentVideo) {
+              // mark hidden
+              currentVideo.isHidden = true;
+              await currentVideo.save();
+              await currentVideo.reload();
+
+              // create new video to wasabi
+              const _id = uuidv4();
+              const extension = req.file.originalname.split(".")[1];
+              const fileName = req.file.originalname.split(".")[0];
+              // Config params
+              const params = {
+                Bucket: "cnht-main-bucket",
+                Body: fs.createReadStream(req.file.path),
+                Key: _id + "." + extension,
+              };
+              // Upload to S3
+              await s3.putObject(params).promise();
+              fs.unlinkSync(req.file.path);
+
+              // create new video to database
+
+              const video = await Video.create({
+                id: _id,
+                fileName: fileName + "." + extension,
+                length: req.body.length,
+                lectureId: lecture.id,
+                isHidden: false,
+              });
+              if (video) {
+                await video.reload();
+                res.status(201).json({
+                  message: log("Update new video successfully"),
+                  count: 1,
+                  video: video,
+                  lecture: lecture,
+                });
+              } else {
+                res.status(500).json({
+                  message: log("Cannot update new video"),
+                  count: 0,
+                  video: null,
+                  lecture: null,
+                });
+              }
+            } else {
+              log("Video not found");
+              res.status(404).json({
+                message: log("Video not found"),
+              });
+            }
+          }
         } else {
           res.status(404).json({
             message: log("lecture not found"),
