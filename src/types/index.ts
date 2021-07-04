@@ -59,3 +59,22 @@ export interface Lecture {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export interface Enrollment {
+  id: string;
+  learnerId: string;
+  courseId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Comment {
+  id: string;
+  text: string;
+  parentId: string;
+  userId: string;
+  lectureId: string;
+  createdAt: Date;
+  updatedAt: Date;
+  isHidden: boolean;
+}
