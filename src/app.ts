@@ -3,10 +3,19 @@ import express, { Request, Response, NextFunction, Application } from "express";
 import cors from "cors";
 import * as dotenv from "dotenv";
 import morgan from "morgan";
+import AWS from "aws-sdk";
+
 dotenv.config();
 const port = 3001;
 const app: Application = express();
-const API_URL = process.env.API_URL;
+// config wasabi
+const credentials = new AWS.SharedIniFileCredentials({
+  profile: "wasabi",
+});
+AWS.config.credentials = credentials;
+AWS.config.credentials.accessKeyId = process.env.WSB_ACCESS_ID!;
+AWS.config.credentials.secretAccessKey = process.env.WSB_SECRET_KEY!;
+AWS.config.region = "ap-northeast-1";
 
 // Connect to MySQL
 import sequelize from "./database/connection";
@@ -20,6 +29,8 @@ import lectureRoutes from "./routes/lectureRoutes";
 import enrollmentRoutes from "./routes/enrollmentRoutes";
 import commentRoutes from "./routes/commentRoutes";
 import depositRequestRoutes from "./routes/depositRequestRoutes";
+import imageRoutes from "./routes/imageRoutes";
+import videoRoutes from "./routes/videoRoutes";
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -48,7 +59,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // Define URL
-app.get(`${API_URL}`, (req: Request, res: Response) => {
+app.get(`/api`, (req: Request, res: Response) => {
   res.status(200).json({
     message: "Welcome to cungnhauhoctoan.net",
   });
@@ -61,6 +72,9 @@ app.use("/api/lectures", lectureRoutes);
 app.use("/api/enrollments", enrollmentRoutes);
 app.use("/api/comments", commentRoutes);
 app.use("/api/deposit-requests", depositRequestRoutes);
+app.use("/api/images", imageRoutes);
+app.use("/api/videos", videoRoutes);
+
 // Handle 404 error
 app.use((req: Request, res: Response, next: NextFunction) => {
   const error: NodeJS.ErrnoException = new Error("Page Not Found!");

@@ -5,46 +5,75 @@ import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import Course from "../models/course";
+import multer from "multer";
+import AWS from "aws-sdk";
+import { v4 as uuidv4 } from "uuid";
+import fs from "fs";
+
 // Define router
 const router: Router = express.Router();
+
+const ep = new AWS.Endpoint("s3.wasabisys.com");
+const s3 = new AWS.S3({ endpoint: ep });
+
+// Multer config
+const upload = multer({
+  dest: "../assets/images",
+});
 
 // POST method: create new course
 router.post(
   "/",
+  upload.single("thumbnail"),
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
-      try {
-        const course = await Course.create({
-          title: req.body.title,
-          courseDescription: req.body.courseDescription,
-          price: req.body.price,
-          courseType: req.body.courseType,
-          grade: req.body.grade,
-          thumbnailUrl: req.body.thumbnailUrl,
-          isHidden: req.body.isHidden,
-        });
-        if (course) {
-          await course.reload();
-          res.status(201).json({
-            message: log("Create new course successfully"),
-            count: 1,
-            course: course,
+      if (req.file) {
+        const _id = uuidv4();
+
+        const extension = req.file.originalname.split(".")[1];
+
+        const params = {
+          Bucket: "cnht-main-bucket",
+          Body: fs.createReadStream(req.file.path),
+          Key: _id + "." + extension,
+        };
+
+        await s3.putObject(params).promise();
+        fs.unlinkSync(req.file.path);
+
+        try {
+          const course = await Course.create({
+            title: req.body.title,
+            courseDescription: req.body.courseDescription,
+            price: req.body.price,
+            courseType: req.body.courseType,
+            grade: req.body.grade,
+            thumbnailUrl: `/api/images/${_id}.${extension}`,
+            isHidden: req.body.isHidden,
           });
-        } else {
+          if (course) {
+            await course.reload();
+            res.status(201).json({
+              message: log("Create new course successfully"),
+              count: 1,
+              course: course,
+            });
+          } else {
+            res.status(500).json({
+              message: log("Cannot create course"),
+              count: 0,
+              course: null,
+            });
+          }
+        } catch (error) {
+          log(error.message);
           res.status(500).json({
-            message: log("Cannot create course"),
+            message: log(error.message),
             count: 0,
             course: null,
           });
         }
-      } catch (error) {
-        log(error.message);
-        res.status(500).json({
-          message: log(error.message),
-          count: 0,
-          course: null,
-        });
       }
     });
   }
