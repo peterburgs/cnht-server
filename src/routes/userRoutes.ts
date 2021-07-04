@@ -5,8 +5,6 @@ import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 
-// TODO: implement image upload using multer
-
 // Define router
 const router: Router = express.Router();
 
