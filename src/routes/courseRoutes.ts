@@ -49,7 +49,7 @@ router.post(
             price: req.body.price,
             courseType: req.body.courseType,
             grade: req.body.grade,
-            thumbnailUrl: `/api/images/${_id}.${extension}`,
+            thumbnailUrl: `/api/courses/thumbnail/${_id}.${extension}`,
             isHidden: req.body.isHidden,
           });
           if (course) {
@@ -117,8 +117,8 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     });
   }
 });
-// PUT method: update a course by PK
 
+// PUT method: update a course by PK
 router.put(
   "/:id",
   requireAuth,
@@ -187,6 +187,87 @@ router.delete(
           res.status(404).json({
             message: log("Course not found"),
           });
+        }
+      } catch (error) {
+        log(error.message);
+        res.status(500).json({
+          message: log(error.message),
+        });
+      }
+    });
+  }
+);
+
+// GET method: get thumbnail of a course
+router.get("/thumbnail/:key", requireAuth, async (req, res, next) => {
+  requireRole(
+    [ROLES.ADMIN, ROLES.LEARNER],
+    req,
+    res,
+    next,
+    async (req, res, next) => {
+      try {
+        // Config aws
+        const ep = new AWS.Endpoint("s3.wasabisys.com");
+        const s3 = new AWS.S3({ endpoint: ep });
+        // Config params
+        const params = {
+          Bucket: "cnht-main-bucket",
+          Key: req.params.key,
+        };
+        // Send image to client
+        return s3.getObject(params).createReadStream().pipe(res);
+      } catch (error) {
+        log(error.message);
+        res.status(500).json({
+          message: log(error.message),
+        });
+      }
+    }
+  );
+});
+
+// PUT method: update thumbnail
+router.put(
+  "/thumbnail/:courseId",
+  upload.single("thumbnail"),
+  requireAuth,
+  async (req, res, next) => {
+    requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
+      try {
+        if (req.file) {
+          const _id = uuidv4();
+
+          const extension = req.file.originalname.split(".")[1];
+
+          const params = {
+            Bucket: "cnht-main-bucket",
+            Body: fs.createReadStream(req.file.path),
+            Key: _id + "." + extension,
+          };
+
+          await s3.putObject(params).promise();
+          fs.unlinkSync(req.file.path);
+          const currentCourse = await Course.findOne({
+            where: {
+              isHidden: false,
+              id: req.params.courseId,
+            },
+          });
+          if (currentCourse) {
+            currentCourse.thumbnailUrl = `/api/courses/thumbnail/${_id}.${extension}`;
+            await currentCourse.save();
+            await currentCourse.reload();
+            res.status(201).json({
+              message: log("Update thumbnail successfully"),
+              count: 1,
+              course: currentCourse,
+            });
+          } else {
+            res.status(404).json({
+              message: log("Course not found"),
+            });
+          }
         }
       } catch (error) {
         log(error.message);
