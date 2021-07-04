@@ -1,3 +1,5 @@
+import { bool } from "aws-sdk/clients/signer";
+
 export enum ROLES {
   ADMIN = "admin",
   LEARNER = "learner",
@@ -85,6 +87,15 @@ export interface DepositRequest {
   amount: number;
   imageUrl: string;
   depositRequestStatus: STATUSES;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Video {
+  id: string;
+  fileName: string;
+  length: number;
+  isHidden: bool;
   createdAt: Date;
   updatedAt: Date;
 }

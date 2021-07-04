@@ -18,7 +18,7 @@ const courseModel = global.sequelize.define<CourseInstance>(
       },
     },
     title: {
-      type: Sequelize.STRING(255),
+      type: Sequelize.TEXT,
       allowNull: false,
       validate: {
         notEmpty: { msg: "Title cannot be empty" },
