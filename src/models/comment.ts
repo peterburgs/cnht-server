@@ -17,7 +17,7 @@ const commentModel = global.sequelize.define<CommentInstance>(
         notEmpty: true,
       },
     },
-    text: {
+    commentText: {
       type: Sequelize.TEXT,
       allowNull: false,
       validate: {

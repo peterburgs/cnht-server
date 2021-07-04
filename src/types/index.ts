@@ -70,11 +70,21 @@ export interface Enrollment {
 
 export interface Comment {
   id: string;
-  text: string;
+  commentText: string;
   parentId: string;
   userId: string;
   lectureId: string;
   createdAt: Date;
   updatedAt: Date;
   isHidden: boolean;
+}
+
+export interface DepositRequest {
+  id: string;
+  learnerId: string;
+  amount: number;
+  imageUrl: string;
+  depositRequestStatus: STATUSES;
+  createdAt: Date;
+  updatedAt: Date;
 }

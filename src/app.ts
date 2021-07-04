@@ -19,6 +19,7 @@ import sectionRoutes from "./routes/sectionRoutes";
 import lectureRoutes from "./routes/lectureRoutes";
 import enrollmentRoutes from "./routes/enrollmentRoutes";
 import commentRoutes from "./routes/commentRoutes";
+import depositRequestRoutes from "./routes/depositRequestRoutes";
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -58,6 +59,8 @@ app.use("/api/courses", courseRoutes);
 app.use("/api/sections", sectionRoutes);
 app.use("/api/lectures", lectureRoutes);
 app.use("/api/enrollments", enrollmentRoutes);
+app.use("/api/comments", commentRoutes);
+app.use("/api/deposit-requests", depositRequestRoutes);
 // Handle 404 error
 app.use((req: Request, res: Response, next: NextFunction) => {
   const error: NodeJS.ErrnoException = new Error("Page Not Found!");

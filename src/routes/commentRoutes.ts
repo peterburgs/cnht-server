@@ -4,51 +4,58 @@ import { ROLES } from "../types";
 import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
-import Lecture from "../models/lecture";
 import Comment from "../models/comment";
+
 // Define router
 const router: Router = express.Router();
 
-// POST method: create new lecture
+// POST method: create new comment
 router.post(
   "/",
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
-    requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
-      try {
-        const lecture = await Lecture.create({
-          title: req.body.title,
-          sectionId: req.body.sectionId,
-          lectureOrder: req.body.lectureOrder,
-          isHidden: req.body.isHidden,
-        });
-        if (lecture) {
-          await lecture.reload();
-          res.status(201).json({
-            message: log("Create new lecture successfully"),
-            count: 1,
-            lecture: lecture,
+    requireRole(
+      [ROLES.ADMIN, ROLES.LEARNER],
+      req,
+      res,
+      next,
+      async (req, res, next) => {
+        try {
+          const comment = await Comment.create({
+            commentText: req.body.commentText,
+            parentId: req.body.parentId,
+            userId: req.body.userId,
+            lectureId: req.body.lectureId,
+            isHidden: req.body.isHidden,
           });
-        } else {
+          if (comment) {
+            await comment.reload();
+            res.status(201).json({
+              message: log("Create new comment successfully"),
+              count: 1,
+              comment: comment,
+            });
+          } else {
+            res.status(500).json({
+              message: log("Cannot create comment"),
+              count: 0,
+              comment: null,
+            });
+          }
+        } catch (error) {
+          log(error.message);
           res.status(500).json({
-            message: log("Cannot create lecture"),
+            message: log(error.message),
             count: 0,
-            lecture: null,
+            comment: null,
           });
         }
-      } catch (error) {
-        log(error.message);
-        res.status(500).json({
-          message: log(error.message),
-          count: 0,
-          lecture: null,
-        });
       }
-    });
+    );
   }
 );
 
-// GET method: get lectures by filters
+// GET method: get comments by filters
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Create filter from request query
@@ -57,110 +64,73 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
       reqParams.push({ [key]: String(value) });
     }
 
-    // Find course from filter
-    const lectures = await Lecture.findAll({
+    // Find comments from filter
+    const comments = await Comment.findAll({
       where: {
         isHidden: false,
         [Op.and]: reqParams,
       },
     });
-    if (lectures.length) {
+    if (comments.length) {
       res.status(200).json({
-        message: log("Lectures found"),
-        count: lectures.length,
-        lectures: lectures,
+        message: log("comments found"),
+        count: comments.length,
+        comments: comments,
       });
     } else {
       res.status(404).json({
-        message: log("No lectures found"),
+        message: log("No comments found"),
         count: 0,
-        lectures: [],
+        comments: [],
       });
     }
   } catch (error) {
     console.log(error.message);
     res.status(500).json({
-      message: log("No lectures found"),
+      message: log("No comments found"),
       count: 0,
-      lectures: [],
+      comments: [],
     });
   }
 });
-// PUT method: update a lecture by PK
 
-router.put(
-  "/:id",
-  requireAuth,
-  async (req: Request, res: Response, next: NextFunction) => {
-    requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
-      try {
-        // Find lecture by id
-        let lecture = await Lecture.findByPk(req.params.id);
-        if (lecture) {
-          // Update
-          lecture.title = req.body.title;
-          lecture.sectionId = req.body.sectionId;
-          lecture.lectureOrder = req.body.lectureOrder;
-          lecture.isHidden = req.body.isHidden;
-          // Save
-          await lecture.save();
-          // Refresh from database
-          await lecture.reload();
-          res.status(200).json({
-            message: log("Update lecture successfully"),
-            count: 1,
-            lecture: lecture,
-          });
-        } else {
-          res.status(404).json({
-            message: log("lecture not found"),
-            count: 0,
-            lecture: null,
-          });
-        }
-      } catch (error) {
-        log(error.message);
-        res.status(500).json({
-          message: log(error.message),
-          count: 0,
-          lecture: null,
-        });
-      }
-    });
-  }
-);
-
-// DELETE method: delete a lecture
+// DELETE method: delete a comment
 router.delete(
   "/:id",
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
-    requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
-      try {
-        // Find lecture by id
-        let lecture = await Lecture.findByPk(req.params.id);
-        if (lecture) {
-          // Mark as hidden
-          lecture.isHidden = true;
-          // Save
-          await lecture.save();
-          // Refresh from database
-          await lecture.reload();
-          res.status(200).json({
-            message: log("Delete lecture successfully"),
-          });
-        } else {
-          res.status(404).json({
-            message: log("lecture not found"),
+    requireRole(
+      [ROLES.ADMIN, ROLES.LEARNER],
+      req,
+      res,
+      next,
+      async (req, res, next) => {
+        try {
+          // Find lecture by id
+          let comment = await Comment.findByPk(req.params.id);
+          if (comment) {
+            // Mark as hidden
+            comment.isHidden = true;
+            // Save
+            await comment.save();
+            // Refresh from database
+            await comment.reload();
+            res.status(200).json({
+              message: log("Delete comment successfully"),
+            });
+          } else {
+            res.status(404).json({
+              message: log("comment not found"),
+            });
+          }
+        } catch (error) {
+          log(error.message);
+          res.status(500).json({
+            message: log(error.message),
           });
         }
-      } catch (error) {
-        log(error.message);
-        res.status(500).json({
-          message: log(error.message),
-        });
       }
-    });
+    );
   }
 );
 
