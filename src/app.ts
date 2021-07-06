@@ -20,6 +20,7 @@ AWS.config.region = "ap-northeast-1";
 // Connect to MySQL
 import sequelize from "./database/connection";
 global.sequelize = sequelize;
+
 // Import Routes
 import userRoutes from "./routes/userRoutes";
 import authRoutes from "./routes/authRoutes";
