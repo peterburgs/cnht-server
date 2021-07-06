@@ -1,7 +1,7 @@
 import express, { Router, Request, Response, NextFunction } from "express";
 import { log } from "../utils";
 import { ROLES } from "../types";
-import { Op, Model } from "sequelize";
+import { Op } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import Course from "../models/course";
