@@ -22,6 +22,7 @@ const fileStorage: { [index: string]: Array<Buffer> } = {};
 // POST: upload thumbnail
 router.post(
   "/:courseId/thumbnail",
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     const fileId = req.headers["x-content-id"];
     const chunkSize = Number(req.headers["x-chunk-length"]);
@@ -68,9 +69,22 @@ router.post(
         };
         await s3.putObject(params).promise();
 
-        res.setHeader("Content-Type", "application/json");
-        res.write(JSON.stringify({ status: 200 }));
-        res.end();
+        const course = await CourseModel.findOne({
+          where: {
+            isHidden: false,
+            id: req.params.courseId,
+          },
+        });
+        if (course) {
+          course.thumbnailUrl = `/api/courses/${course.id}/thumbnail/${_id}.${extension}`;
+          await course.save();
+          return res.status(201).json({
+            message: "Thumbnail uploaded",
+            course: course,
+          });
+        } else {
+          return res.status(404).json({ message: "Cannot find course" });
+        }
       } else {
         res.status(200).json({
           message: "Continuing",
@@ -89,49 +103,36 @@ router.post(
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
-      if (req.file) {
-        const _id = uuidv4();
-        const extension = req.file.originalname.split(".")[1];
-        const params = {
-          Bucket: "cnht-main-bucket",
-          Body: fs.createReadStream(req.file.path),
-          Key: _id + "." + extension,
-        };
-        await s3.putObject(params).promise();
-        fs.unlinkSync(req.file.path);
-
-        try {
-          const course = await CourseModel.create({
-            title: req.body.title,
-            courseDescription: req.body.courseDescription,
-            price: req.body.price,
-            courseType: req.body.courseType,
-            grade: req.body.grade,
-            thumbnailUrl: `/api/courses/thumbnail/${_id}.${extension}`,
-            isHidden: req.body.isHidden,
+      try {
+        const course = await CourseModel.create({
+          title: req.body.title,
+          courseDescription: req.body.courseDescription,
+          price: req.body.price,
+          courseType: req.body.courseType,
+          grade: req.body.grade,
+          isHidden: req.body.isHidden,
+        });
+        if (course) {
+          await course.reload();
+          res.status(201).json({
+            message: log("Create new course successfully"),
+            count: 1,
+            course: course,
           });
-          if (course) {
-            await course.reload();
-            res.status(201).json({
-              message: log("Create new course successfully"),
-              count: 1,
-              course: course,
-            });
-          } else {
-            res.status(500).json({
-              message: log("Cannot create course"),
-              count: 0,
-              course: null,
-            });
-          }
-        } catch (error) {
-          log(error.message);
+        } else {
           res.status(500).json({
-            message: log(error.message),
+            message: log("Cannot create course"),
             count: 0,
             course: null,
           });
         }
+      } catch (error) {
+        log(error.message);
+        res.status(500).json({
+          message: log(error.message),
+          count: 0,
+          course: null,
+        });
       }
     });
   }
@@ -192,7 +193,6 @@ router.put(
           course.price = req.body.price;
           course.courseType = req.body.courseType;
           course.grade = req.body.grade;
-          course.thumbnailUrl = req.body.thumbnailUrl;
           course.isHidden = req.body.isHidden;
           // Save
           await course.save();
@@ -278,51 +278,51 @@ router.get("/:courseId/thumbnail/:key", async (req, res, next) => {
 });
 
 // PUT method: update thumbnail
-router.put("/:courseId/thumbnail", requireAuth, async (req, res, next) => {
-  requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
-    try {
-      if (req.file) {
-        const _id = uuidv4();
+// router.put("/:courseId/thumbnail", requireAuth, async (req, res, next) => {
+//   requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
+//     try {
+//       if (req.file) {
+//         const _id = uuidv4();
 
-        const extension = req.file.originalname.split(".")[1];
+//         const extension = req.file.originalname.split(".")[1];
 
-        const params = {
-          Bucket: "cnht-main-bucket",
-          Body: fs.createReadStream(req.file.path),
-          Key: _id + "." + extension,
-        };
+//         const params = {
+//           Bucket: "cnht-main-bucket",
+//           Body: fs.createReadStream(req.file.path),
+//           Key: _id + "." + extension,
+//         };
 
-        await s3.putObject(params).promise();
-        fs.unlinkSync(req.file.path);
-        const currentCourse = await CourseModel.findOne({
-          where: {
-            isHidden: false,
-            id: req.params.courseId,
-          },
-        });
-        if (currentCourse) {
-          currentCourse.thumbnailUrl = `/api/courses/thumbnail/${_id}.${extension}`;
-          await currentCourse.save();
-          await currentCourse.reload();
-          res.status(201).json({
-            message: log("Update thumbnail successfully"),
-            count: 1,
-            course: currentCourse,
-          });
-        } else {
-          res.status(404).json({
-            message: log("Course not found"),
-          });
-        }
-      }
-    } catch (error) {
-      log(error.message);
-      res.status(500).json({
-        message: log(error.message),
-      });
-    }
-  });
-});
+//         await s3.putObject(params).promise();
+//         fs.unlinkSync(req.file.path);
+//         const currentCourse = await CourseModel.findOne({
+//           where: {
+//             isHidden: false,
+//             id: req.params.courseId,
+//           },
+//         });
+//         if (currentCourse) {
+//           currentCourse.thumbnailUrl = `/api/courses/thumbnail/${_id}.${extension}`;
+//           await currentCourse.save();
+//           await currentCourse.reload();
+//           res.status(201).json({
+//             message: log("Update thumbnail successfully"),
+//             count: 1,
+//             course: currentCourse,
+//           });
+//         } else {
+//           res.status(404).json({
+//             message: log("Course not found"),
+//           });
+//         }
+//       }
+//     } catch (error) {
+//       log(error.message);
+//       res.status(500).json({
+//         message: log(error.message),
+//       });
+//     }
+//   });
+// });
 
 // GET method: get all lectures of a course by courseId
 router.get("/:courseId/lectures", async (req, res, next) => {
