@@ -1,5 +1,3 @@
-import { bool } from "aws-sdk/clients/signer";
-
 export enum ROLES {
   ADMIN = "admin",
   LEARNER = "learner",
@@ -38,6 +36,9 @@ export interface Course {
   price: number;
   courseType: COURSE_TYPE;
   grade: GRADES;
+  learnerCount: number;
+  sectionCount: number;
+  lectureCount: number;
   thumbnailUrl: string;
   isHidden: boolean;
   createdAt: Date;
@@ -95,7 +96,7 @@ export interface Video {
   id: string;
   fileName: string;
   length: number;
-  isHidden: bool;
+  isHidden: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

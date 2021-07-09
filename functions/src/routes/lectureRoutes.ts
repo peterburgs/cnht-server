@@ -25,127 +25,6 @@ const s3 = new AWS.S3({ endpoint: ep });
 const router: Router = express.Router();
 
 const fileStorage: { [index: string]: Array<Buffer> } = {};
-// POST: upload video
-router.post("/:lectureId/upload", async (req, res, next) => {
-  try {
-    const fileId = req.headers["x-content-id"];
-    const chunkSize = Number(req.headers["x-chunk-length"]);
-    const chunkId = Number(req.headers["x-chunk-id"]);
-    const chunksQuantity = Number(req.headers["x-chunks-quantity"]);
-    const originalFileName = req.headers["x-content-name"];
-    const fileSize = Number(req.headers["x-content-length"]);
-    const duration = Number(req.headers["x-video-duration"]);
-    const file = (fileStorage[fileId as string] =
-      fileStorage[fileId as string] || []);
-    const chunk: Buffer[] = [];
-
-    console.log(chunkSize);
-    chunk.push(req.body);
-    const completeChunk = Buffer.concat(chunk);
-    if (completeChunk.length !== chunkSize) {
-      return res.status(400).json({
-        message: "Bad request",
-      });
-    }
-
-    file[chunkId] = completeChunk;
-    console.log(file);
-    console.log(chunksQuantity);
-    const fileCompleted =
-      file.filter((chunk) => chunk).length === chunksQuantity;
-    console.log(fileCompleted);
-
-    if (fileCompleted) {
-      const completeFile = Buffer.concat(file);
-      if (completeFile.length !== fileSize) {
-        return res.status(400).json({
-          message: "Bad request",
-        });
-      }
-
-      delete fileStorage[fileId as string];
-
-      const _id = uuidv4();
-      const extension = (originalFileName as string).split(".")[1];
-      const name = (originalFileName as string).split(".")[0];
-      // Config params
-      const params = {
-        Bucket: "cnht-main-bucket",
-        Body: completeFile,
-        Key: _id + "." + extension,
-      };
-      // Upload to S3
-      await s3.putObject(params).promise();
-
-      const currentVideo = await Video.findOne({
-        where: {
-          isHidden: false,
-          lectureId: req.params.lectureId,
-        },
-      });
-      if (currentVideo) {
-        // mark hidden
-        currentVideo.isHidden = true;
-        await currentVideo.save();
-        await currentVideo.reload();
-
-        // create new video to database
-        const video = await Video.create({
-          id: _id,
-          fileName: name + "." + extension,
-          length: duration,
-          lectureId: req.params.lectureId,
-          isHidden: false,
-        });
-        if (video) {
-          await video.reload();
-          res.status(201).json({
-            message: log("Update video successfully"),
-            count: 1,
-            video: video,
-          });
-        } else {
-          res.status(500).json({
-            message: log("Cannot update new video"),
-            count: 0,
-            video: null,
-          });
-        }
-      } else {
-        const video = await Video.create({
-          id: _id,
-          fileName: name + "." + extension,
-          length: req.body.length,
-          lectureId: req.params.lectureId,
-          isHidden: false,
-        });
-        if (video) {
-          await video.reload();
-          res.status(201).json({
-            message: log("Upload video successfully"),
-            count: 1,
-            video: video,
-          });
-        } else {
-          res.status(500).json({
-            message: log("Cannot upload new video"),
-            count: 0,
-            video: null,
-          });
-        }
-      }
-    } else {
-      res.status(200).json({
-        message: "Continuing",
-      });
-    }
-  } catch (err) {
-    console.log(err.message);
-    res.status(500).json({
-      message: err.message,
-    });
-  }
-});
 
 // POST method: create new lecture
 router.post(
@@ -154,25 +33,40 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        const lecture = await Lecture.create({
-          title: req.body.title,
-          sectionId: req.body.sectionId,
-          lectureOrder: req.body.lectureOrder,
-          isHidden: false,
+        const course = await Course.findOne({
+          where: {
+            isHidden: false,
+            id: req.body.courseId,
+          },
         });
-        if (lecture) {
-          await lecture.reload();
-
-          res.status(201).json({
-            message: log("Create new lecture successfully"),
-            count: 1,
-            lecture: lecture,
+        if (course) {
+          course.lectureCount += 1;
+          await course.save();
+          await course.reload();
+          const lecture = await Lecture.create({
+            title: req.body.title,
+            sectionId: req.body.sectionId,
+            lectureOrder: course.lectureCount,
           });
+          if (lecture) {
+            await lecture.reload();
+            res.status(201).json({
+              message: log("Create new lecture successfully"),
+              count: 1,
+              lecture: lecture,
+            });
+          } else {
+            res.status(500).json({
+              message: log("Cannot create lecture"),
+              count: 0,
+              lecture: null,
+            });
+          }
         } else {
-          res.status(500).json({
-            message: log("Cannot create lecture"),
-            count: 0,
-            lecture: null,
+          res.status(404).json({
+            message: log("Course not found"),
+            count: 1,
+            course: null,
           });
         }
       } catch (error) {
@@ -226,7 +120,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-// PUT method: update a lecture by PK
+// PUT method: update a lecture by id
 router.put(
   "/:id",
   requireAuth,
@@ -240,7 +134,6 @@ router.put(
           lecture.title = req.body.title;
           lecture.sectionId = req.body.sectionId;
           lecture.lectureOrder = req.body.lectureOrder;
-          lecture.isHidden = req.body.isHidden;
           // Save
           await lecture.save();
           // Refresh from database
@@ -312,8 +205,128 @@ const googleAuth = async (token: string) => {
   return ticket.getPayload();
 };
 
+// POST: upload video
+router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
+  requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
+    try {
+      const fileId = req.headers["x-content-id"];
+      const chunkSize = Number(req.headers["x-chunk-length"]);
+      const chunkId = Number(req.headers["x-chunk-id"]);
+      const chunksQuantity = Number(req.headers["x-chunks-quantity"]);
+      const originalFileName = req.headers["x-content-name"];
+      const fileSize = Number(req.headers["x-content-length"]);
+
+      const file = (fileStorage[fileId as string] =
+        fileStorage[fileId as string] || []);
+      const chunk: Buffer[] = [];
+
+      console.log(chunkSize);
+      chunk.push(req.body);
+      const completeChunk = Buffer.concat(chunk);
+      if (completeChunk.length !== chunkSize) {
+        return res.status(400).json({
+          message: "Bad request",
+        });
+      }
+
+      file[chunkId] = completeChunk;
+      console.log(file);
+      console.log(chunksQuantity);
+      const fileCompleted =
+        file.filter((chunk) => chunk).length === chunksQuantity;
+      console.log(fileCompleted);
+
+      if (fileCompleted) {
+        const completeFile = Buffer.concat(file);
+        if (completeFile.length !== fileSize) {
+          return res.status(400).json({
+            message: "Bad request",
+          });
+        }
+
+        delete fileStorage[fileId as string];
+
+        const _id = uuidv4();
+        const extension = (originalFileName as string).split(".")[1];
+        const name = (originalFileName as string).split(".")[0];
+        // Config params
+        const params = {
+          Bucket: "cnht-main-bucket",
+          Body: completeFile,
+          Key: _id + "." + extension,
+        };
+        // Upload to S3
+        await s3.putObject(params).promise();
+
+        const currentVideo = await Video.findOne({
+          where: {
+            isHidden: false,
+            lectureId: req.params.lectureId,
+          },
+        });
+        if (currentVideo) {
+          // mark hidden
+          currentVideo.isHidden = true;
+          await currentVideo.save();
+          await currentVideo.reload();
+
+          // create new video to database
+          const video = await Video.create({
+            id: _id,
+            fileName: name + "." + extension,
+            lectureId: req.params.lectureId,
+          });
+          if (video) {
+            await video.reload();
+            res.status(201).json({
+              message: log("Update video successfully"),
+              count: 1,
+              video: video,
+            });
+          } else {
+            res.status(500).json({
+              message: log("Cannot update new video"),
+              count: 0,
+              video: null,
+            });
+          }
+        } else {
+          const video = await Video.create({
+            id: _id,
+            fileName: name + "." + extension,
+            lectureId: req.params.lectureId,
+          });
+          if (video) {
+            await video.reload();
+            res.status(201).json({
+              message: log("Upload video successfully"),
+              count: 1,
+              video: video,
+            });
+          } else {
+            res.status(500).json({
+              message: log("Cannot upload new video"),
+              count: 0,
+              video: null,
+            });
+          }
+        }
+      } else {
+        res.status(200).json({
+          message: "Continuing",
+        });
+      }
+    } catch (err) {
+      console.log(err.message);
+      res.status(500).json({
+        message: err.message,
+      });
+    }
+  });
+});
+
 // GET method: stream video from wasabi
-router.get("/:lectureId/streaming", async (req, res, next) => {
+router.get("/:lectureId/video/streaming", async (req, res, next) => {
   try {
     const token =
       req.query
@@ -393,8 +406,8 @@ router.get("/:lectureId/streaming", async (req, res, next) => {
       }
       // Learner not purchase
       else {
-        res.status(404).json({
-          message: log("Learner not purchase yet"),
+        res.status(401).json({
+          message: log("Permission denied"),
         });
       }
     } // If client does not send token
@@ -409,6 +422,38 @@ router.get("/:lectureId/streaming", async (req, res, next) => {
       message: log(error.message),
     });
   }
+});
+
+// PUT method: update length of the video of a lecture
+router.put("/:lectureId/video/length", requireAuth, async (req, res, next) => {
+  requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
+    try {
+      const videoModel = await Video.findOne({
+        where: {
+          isHidden: false,
+          lectureId: req.params.lectureId,
+        },
+      });
+      if (videoModel) {
+        videoModel.length = req.body.length;
+        await videoModel.save();
+        await videoModel.reload();
+        res.status(200).json({
+          message: log("Video update successfully"),
+          count: 1,
+          video: videoModel,
+        });
+      } else {
+        res.status(404).json({
+          message: log("Video not found"),
+        });
+      }
+    } catch (error) {
+      res.status(500).json({
+        message: log(error.message),
+      });
+    }
+  });
 });
 
 export default router;

@@ -19,81 +19,84 @@ const ep = new AWS.Endpoint("s3.wasabisys.com");
 const s3 = new AWS.S3({ endpoint: ep });
 
 const fileStorage: { [index: string]: Array<Buffer> } = {};
+
 // POST: upload thumbnail
 router.post(
   "/:courseId/thumbnail",
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
-    const fileId = req.headers["x-content-id"];
-    const chunkSize = Number(req.headers["x-chunk-length"]);
-    const chunkId = Number(req.headers["x-chunk-id"]);
-    const chunksQuantity = Number(req.headers["x-chunks-quantity"]);
-    const fileName = req.headers["x-content-name"];
-    const fileSize = Number(req.headers["x-content-length"]);
-    const file = (fileStorage[fileId as string] =
-      fileStorage[fileId as string] || []);
-    const chunk: Buffer[] = [];
-    try {
-      console.log(chunkSize);
-      chunk.push(req.body);
-      const completeChunk = Buffer.concat(chunk);
-      if (completeChunk.length !== chunkSize) {
-        return res.status(400).json({
-          message: "Bad request",
-        });
-      }
-
-      file[chunkId] = completeChunk;
-      console.log(file);
-      console.log(chunksQuantity);
-      const fileCompleted =
-        file.filter((chunk) => chunk).length === chunksQuantity;
-      console.log(fileCompleted);
-
-      if (fileCompleted) {
-        const completeFile = Buffer.concat(file);
-        if (completeFile.length !== fileSize) {
+    requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
+      const fileId = req.headers["x-content-id"];
+      const chunkSize = Number(req.headers["x-chunk-length"]);
+      const chunkId = Number(req.headers["x-chunk-id"]);
+      const chunksQuantity = Number(req.headers["x-chunks-quantity"]);
+      const fileName = req.headers["x-content-name"];
+      const fileSize = Number(req.headers["x-content-length"]);
+      const file = (fileStorage[fileId as string] =
+        fileStorage[fileId as string] || []);
+      const chunk: Buffer[] = [];
+      try {
+        console.log(chunkSize);
+        chunk.push(req.body);
+        const completeChunk = Buffer.concat(chunk);
+        if (completeChunk.length !== chunkSize) {
           return res.status(400).json({
             message: "Bad request",
           });
         }
 
-        delete fileStorage[fileId as string];
+        file[chunkId] = completeChunk;
+        console.log(file);
+        console.log(chunksQuantity);
+        const fileCompleted =
+          file.filter((chunk) => chunk).length === chunksQuantity;
+        console.log(fileCompleted);
 
-        const _id = uuidv4();
-        const extension = (fileName! as string).split(".")[1];
-        const params = {
-          Bucket: "cnht-main-bucket",
-          Body: completeFile,
-          Key: _id + "." + extension,
-        };
-        await s3.putObject(params).promise();
+        if (fileCompleted) {
+          const completeFile = Buffer.concat(file);
+          if (completeFile.length !== fileSize) {
+            return res.status(400).json({
+              message: "Bad request",
+            });
+          }
 
-        const course = await CourseModel.findOne({
-          where: {
-            isHidden: false,
-            id: req.params.courseId,
-          },
-        });
-        if (course) {
-          course.thumbnailUrl = `/api/courses/${course.id}/thumbnail/${_id}.${extension}`;
-          await course.save();
-          return res.status(201).json({
-            message: "Thumbnail uploaded",
-            course: course,
+          delete fileStorage[fileId as string];
+
+          const _id = uuidv4();
+          const extension = (fileName! as string).split(".")[1];
+          const params = {
+            Bucket: "cnht-main-bucket",
+            Body: completeFile,
+            Key: _id + "." + extension,
+          };
+          await s3.putObject(params).promise();
+
+          const course = await CourseModel.findOne({
+            where: {
+              isHidden: false,
+              id: req.params.courseId,
+            },
           });
+          if (course) {
+            course.thumbnailUrl = `/api/courses/thumbnail/${_id}.${extension}`;
+            await course.save();
+            return res.status(201).json({
+              message: "Thumbnail uploaded",
+              course: course,
+            });
+          } else {
+            return res.status(404).json({ message: "Cannot find course" });
+          }
         } else {
-          return res.status(404).json({ message: "Cannot find course" });
+          res.status(200).json({
+            message: "Continuing",
+          });
         }
-      } else {
-        res.status(200).json({
-          message: "Continuing",
-        });
+      } catch (err) {
+        console.log(err);
+        return res.status(500).json({ message: "Server error" });
       }
-    } catch (err) {
-      console.log(err);
-      return res.status(500).json({ message: "Server error" });
-    }
+    });
   }
 );
 
@@ -110,7 +113,6 @@ router.post(
           price: req.body.price,
           courseType: req.body.courseType,
           grade: req.body.grade,
-          isHidden: req.body.isHidden,
         });
         if (course) {
           await course.reload();
@@ -177,7 +179,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-// PUT method: update a course by PK
+// PUT method: update a course by id
 router.put(
   "/:id",
   requireAuth,
@@ -193,7 +195,6 @@ router.put(
           course.price = req.body.price;
           course.courseType = req.body.courseType;
           course.grade = req.body.grade;
-          course.isHidden = req.body.isHidden;
           // Save
           await course.save();
           // Refresh from database
@@ -257,7 +258,8 @@ router.delete(
 );
 
 // GET method: get thumbnail of a course
-router.get("/:courseId/thumbnail/:key", async (req, res, next) => {
+
+router.get("/thumbnail/:key", async (req, res, next) => {
   try {
     // Config aws
     const ep = new AWS.Endpoint("s3.wasabisys.com");
@@ -276,53 +278,6 @@ router.get("/:courseId/thumbnail/:key", async (req, res, next) => {
     });
   }
 });
-
-// PUT method: update thumbnail
-// router.put("/:courseId/thumbnail", requireAuth, async (req, res, next) => {
-//   requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
-//     try {
-//       if (req.file) {
-//         const _id = uuidv4();
-
-//         const extension = req.file.originalname.split(".")[1];
-
-//         const params = {
-//           Bucket: "cnht-main-bucket",
-//           Body: fs.createReadStream(req.file.path),
-//           Key: _id + "." + extension,
-//         };
-
-//         await s3.putObject(params).promise();
-//         fs.unlinkSync(req.file.path);
-//         const currentCourse = await CourseModel.findOne({
-//           where: {
-//             isHidden: false,
-//             id: req.params.courseId,
-//           },
-//         });
-//         if (currentCourse) {
-//           currentCourse.thumbnailUrl = `/api/courses/thumbnail/${_id}.${extension}`;
-//           await currentCourse.save();
-//           await currentCourse.reload();
-//           res.status(201).json({
-//             message: log("Update thumbnail successfully"),
-//             count: 1,
-//             course: currentCourse,
-//           });
-//         } else {
-//           res.status(404).json({
-//             message: log("Course not found"),
-//           });
-//         }
-//       }
-//     } catch (error) {
-//       log(error.message);
-//       res.status(500).json({
-//         message: log(error.message),
-//       });
-//     }
-//   });
-// });
 
 // GET method: get all lectures of a course by courseId
 router.get("/:courseId/lectures", async (req, res, next) => {

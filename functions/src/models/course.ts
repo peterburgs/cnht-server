@@ -36,6 +36,21 @@ const courseModel = sequelize.define<CourseInstance>(
       allowNull: false,
       defaultValue: 0,
     },
+    learnerCount: {
+      type: Sequelize.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    lectureCount: {
+      type: Sequelize.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    sectionCount: {
+      type: Sequelize.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
     courseType: {
       type: Sequelize.ENUM(COURSE_TYPE.THEORY, COURSE_TYPE.EXAMINATION_SOLVING),
       allowNull: false,

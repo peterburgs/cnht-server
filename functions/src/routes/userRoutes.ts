@@ -29,6 +29,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
         // Find user from filter
         const users = await User.findAll({
           where: {
+            isHidden: false,
             [Op.and]: reqParams,
           },
         });
@@ -71,7 +72,6 @@ router.put("/:id", async (req: Request, res: Response, next: NextFunction) => {
         if (user) {
           // Update
           user.email = req.body.email;
-          user.userRole = req.body.userRole;
           user.balance = req.body.balance;
 
           // Save

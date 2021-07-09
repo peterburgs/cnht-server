@@ -46,7 +46,7 @@ const depositRequestModel = sequelize.define<DepositRequestInstance>(
     },
     depositRequestStatus: {
       type: Sequelize.ENUM(STATUSES.PENDING, STATUSES.CONFIRM, STATUSES.DENIED),
-      allowNull: false,
+      allowNull: true,
       defaultValue: STATUSES.PENDING,
     },
   },

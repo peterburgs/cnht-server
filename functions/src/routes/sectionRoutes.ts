@@ -5,6 +5,7 @@ import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import Section from "../models/section";
+import Course from "../models/course";
 // Define router
 const router: Router = express.Router();
 
@@ -15,24 +16,42 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        const section = await Section.create({
-          title: req.body.title,
-          courseId: req.body.courseId,
-          sectionOrder: req.body.sectionOrder,
-          isHidden: req.body.isHidden,
+        const course = await Course.findOne({
+          where: {
+            isHidden: false,
+            id: req.body.courseId,
+          },
         });
-        if (section) {
-          await section.reload();
-          res.status(201).json({
-            message: log("Create new section successfully"),
-            count: 1,
-            section: section,
+        if (course) {
+          course.sectionCount += 1;
+          await course.save();
+          await course.reload();
+          const section = await Section.create({
+            title: req.body.title,
+            courseId: req.body.courseId,
+            sectionOrder: course.sectionCount,
           });
+          if (section) {
+            await section.reload();
+
+            res.status(201).json({
+              message: log("Create new section successfully"),
+              count: 1,
+              section: section,
+            });
+          } else {
+            res.status(500).json({
+              message: log("Cannot create section"),
+              count: 0,
+              section: null,
+            });
+          }
         } else {
-          res.status(500).json({
-            message: log("Cannot create section"),
+          res.status(404).json({
+            message: log("Course not found"),
             count: 0,
             section: null,
+            course: null,
           });
         }
       } catch (error) {
@@ -85,7 +104,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     });
   }
 });
-// PUT method: update a section by PK
+// PUT method: update a section by id
 
 router.put(
   "/:id",
@@ -98,9 +117,7 @@ router.put(
         if (section) {
           // Update
           section.title = req.body.title;
-          section.courseId = req.body.courseId;
           section.sectionOrder = req.body.sectionOrder;
-          section.isHidden = req.body.isHidden;
           // Save
           await section.save();
           // Refresh from database
