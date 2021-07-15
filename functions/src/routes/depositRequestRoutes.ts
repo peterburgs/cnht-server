@@ -6,13 +6,18 @@ import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import DepositRequest from "../models/depositRequest";
 import { v4 as uuidv4 } from "uuid";
-import AWS from "aws-sdk";
+import { Storage } from "@google-cloud/storage";
+import path from "path";
 
 // Define router
 const router: Router = express.Router();
 
-const ep = new AWS.Endpoint("s3.wasabisys.com");
-const s3 = new AWS.S3({ endpoint: ep });
+const storage = new Storage({
+  keyFilename: path.join(__dirname, "../key.json"),
+  projectId: process.env.PROJECT_ID,
+});
+
+const bucket = storage.bucket(process.env.BUCKET!);
 
 const fileStorage: { [index: string]: Array<Buffer> } = {};
 
@@ -59,16 +64,11 @@ router.post(
 
         const _id = uuidv4();
         const extension = (fileName! as string).split(".")[1];
-        const params = {
-          Bucket: "cnht-main-bucket",
-          Body: completeFile,
-          Key: _id + "." + extension,
-        };
-        await s3.putObject(params).promise();
+        const fileInBucket = bucket.file(_id + "." + extension);
+        await fileInBucket.save(completeFile);
 
         const depositRequest = await DepositRequest.findOne({
           where: {
-            isHidden: false,
             id: req.params.depositRequestId,
           },
         });
@@ -99,16 +99,8 @@ router.post(
 // GET method: get image of a deposit request
 router.get("/images/:key", async (req, res, next) => {
   try {
-    // Config aws
-    const ep = new AWS.Endpoint("s3.wasabisys.com");
-    const s3 = new AWS.S3({ endpoint: ep });
-    // Config params
-    const params = {
-      Bucket: "cnht-main-bucket",
-      Key: req.params.key,
-    };
-    // Send image to client
-    return s3.getObject(params).createReadStream().pipe(res);
+    const file = bucket.file(req.params.key);
+    return file.createReadStream().pipe(res);
   } catch (error) {
     log(error.message);
     res.status(500).json({

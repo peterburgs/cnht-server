@@ -1,22 +1,25 @@
 import express, { Router, Request, Response, NextFunction } from "express";
 import { log } from "../utils";
-import { Lecture, ROLES } from "../types";
+import { Lecture, ROLES, Video } from "../types";
 import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import CourseModel from "../models/course";
 import SectionModel from "../models/section";
 import LectureModel from "../models/lecture";
-import AWS from "aws-sdk";
+import VideoModel from "../models/video";
 import { v4 as uuidv4 } from "uuid";
-import fs from "fs";
-import os from "os";
-import { join, sep } from "path";
+import { Storage } from "@google-cloud/storage";
+import path from "path";
+
 // Define router
 const router: Router = express.Router();
 
-const ep = new AWS.Endpoint("s3.wasabisys.com");
-const s3 = new AWS.S3({ endpoint: ep });
+const storage = new Storage({
+  keyFilename: path.join(__dirname, "../key.json"),
+  projectId: process.env.PROJECT_ID,
+});
+const bucket = storage.bucket(process.env.BUCKET!);
 
 const fileStorage: { [index: string]: Array<Buffer> } = {};
 
@@ -64,12 +67,8 @@ router.post(
 
           const _id = uuidv4();
           const extension = (fileName! as string).split(".")[1];
-          const params = {
-            Bucket: "cnht-main-bucket",
-            Body: completeFile,
-            Key: _id + "." + extension,
-          };
-          await s3.putObject(params).promise();
+          const fileInBucket = bucket.file(_id + "." + extension);
+          await fileInBucket.save(completeFile);
 
           const course = await CourseModel.findOne({
             where: {
@@ -258,23 +257,14 @@ router.delete(
 );
 
 // GET method: get thumbnail of a course
-
 router.get("/thumbnail/:key", async (req, res, next) => {
   try {
-    // Config aws
-    const ep = new AWS.Endpoint("s3.wasabisys.com");
-    const s3 = new AWS.S3({ endpoint: ep });
-    // Config params
-    const params = {
-      Bucket: "cnht-main-bucket",
-      Key: req.params.key,
-    };
-    // Send image to client
-    return s3.getObject(params).createReadStream().pipe(res);
-  } catch (error) {
-    log(error.message);
+    const file = bucket.file(req.params.key);
+    return file.createReadStream().pipe(res);
+  } catch (err) {
+    log(err.message);
     res.status(500).json({
-      message: log(error.message),
+      message: log(err.message),
     });
   }
 });
@@ -330,4 +320,89 @@ router.get("/:courseId/lectures", async (req, res, next) => {
     });
   }
 });
+
+// GET method: estimate course pricing
+router.get("/:courseId/pricing", async (req, res, next) => {
+  const course = await CourseModel.findOne({
+    where: {
+      isHidden: false,
+      id: req.params.courseId,
+    },
+  });
+  if (course) {
+    const sections = await SectionModel.findAll({
+      where: {
+        isHidden: false,
+        courseId: course.id,
+      },
+    });
+    if (sections.length) {
+      let _lectures: Lecture[] = [];
+      for (let i = 0; i < sections.length; i++) {
+        const section = sections[i];
+        const lectures = await LectureModel.findAll({
+          where: {
+            isHidden: false,
+            sectionId: section.id,
+          },
+        });
+        if (lectures.length) {
+          _lectures = _lectures.concat(lectures);
+        }
+      }
+      let _videos: Video[] = [];
+      for (let j = 0; j < _lectures.length; j++) {
+        const lecture = _lectures[j];
+        const videos = await VideoModel.findAll({
+          where: {
+            isHidden: false,
+            lectureId: lecture.id,
+          },
+        });
+        _videos = _videos.concat(videos);
+        if (_videos.length == 0) {
+          return res.status(404).json({
+            message: log("No lectures found"),
+            price: 0,
+          });
+        }
+        const totalBytes = _videos.reduce((e, i) => e + i.size, 0);
+        const scala = 23500 / (1024 * 1024 * 1024);
+        res.status(200).json({
+          message: log("Get estimated pricing successfully"),
+          price: Math.floor(totalBytes * 2 * scala),
+        });
+      }
+    } else {
+      res.status(404).json({
+        message: log("Sections not found"),
+        price: 0,
+      });
+    }
+  } else {
+    res.status(404).json({
+      message: log("Course not found"),
+      price: 0,
+    });
+  }
+});
+
+// GET method: get all sections
+router.get("/:courseId/sections", async (req, res, next) => {
+  const sections = await SectionModel.findAll({
+    where: {
+      isHidden: false,
+      courseId: req.params.courseId,
+    },
+  });
+  if (sections.length) {
+    sections.sort((a, b) => a.sectionOrder - b.sectionOrder);
+    res.status(200).json({
+      message: log("Get sections successfully"),
+      count: sections.length,
+      sections: sections,
+    });
+  }
+});
+
 export default router;

@@ -96,6 +96,7 @@ export interface Video {
   id: string;
   fileName: string;
   length: number;
+  size: number;
   isHidden: boolean;
   createdAt: Date;
   updatedAt: Date;

@@ -39,10 +39,7 @@ const depositRequestModel = sequelize.define<DepositRequestInstance>(
     },
     imageUrl: {
       type: Sequelize.TEXT,
-      allowNull: false,
-      validate: {
-        notEmpty: { msg: "Image URL cannot be empty" },
-      },
+      allowNull: true,
     },
     depositRequestStatus: {
       type: Sequelize.ENUM(STATUSES.PENDING, STATUSES.CONFIRM, STATUSES.DENIED),

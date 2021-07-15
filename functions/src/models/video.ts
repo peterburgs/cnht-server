@@ -29,6 +29,10 @@ const videoModel = sequelize.define<VideoInstance>(
       type: Sequelize.BIGINT,
       allowNull: true,
     },
+    size: {
+      type: Sequelize.BIGINT,
+      allowNull: true,
+    },
     lectureId: {
       type: Sequelize.STRING(255),
       allowNull: false,

@@ -11,20 +11,24 @@ import Section from "../models/section";
 import Lecture from "../models/lecture";
 import User from "../models/user";
 import { v4 as uuidv4 } from "uuid";
-import fs from "fs";
-import AWS from "aws-sdk";
 import { auth, OAuth2Client } from "google-auth-library";
+import { Storage } from "@google-cloud/storage";
+import path from "path";
+import moment from "moment";
 
 const client = new OAuth2Client(process.env.CLIENT_ID);
-
-// Config aws
-const ep = new AWS.Endpoint("s3.wasabisys.com");
-const s3 = new AWS.S3({ endpoint: ep });
 
 // Define router
 const router: Router = express.Router();
 
 const fileStorage: { [index: string]: Array<Buffer> } = {};
+
+const storage = new Storage({
+  keyFilename: path.join(__dirname, "../key.json"),
+  projectId: process.env.PROJECT_ID,
+});
+
+const bucket = storage.bucket(process.env.BUCKET!);
 
 // POST method: create new lecture
 router.post(
@@ -200,7 +204,7 @@ router.delete(
 const googleAuth = async (token: string) => {
   const ticket = await client.verifyIdToken({
     idToken: token,
-    audience: process.env.CLIENT_ID!,
+    audience: [process.env.CLIENT_ID!, process.env.LOCAL_CLIENT_ID!],
   });
   return ticket.getPayload();
 };
@@ -249,14 +253,8 @@ router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
         const _id = uuidv4();
         const extension = (originalFileName as string).split(".")[1];
         const name = (originalFileName as string).split(".")[0];
-        // Config params
-        const params = {
-          Bucket: "cnht-main-bucket",
-          Body: completeFile,
-          Key: _id + "." + extension,
-        };
-        // Upload to S3
-        await s3.putObject(params).promise();
+        const fileInBucket = bucket.file(_id + "." + extension);
+        await fileInBucket.save(completeFile);
 
         const currentVideo = await Video.findOne({
           where: {
@@ -274,6 +272,7 @@ router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
           const video = await Video.create({
             id: _id,
             fileName: name + "." + extension,
+            size: fileSize,
             lectureId: req.params.lectureId,
           });
           if (video) {
@@ -293,6 +292,7 @@ router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
         } else {
           const video = await Video.create({
             id: _id,
+            size: fileSize,
             fileName: name + "." + extension,
             lectureId: req.params.lectureId,
           });
@@ -325,7 +325,7 @@ router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
   });
 });
 
-// GET method: stream video from wasabi
+// GET method: Get signed url to stream video
 router.get("/:lectureId/video/streaming", async (req, res, next) => {
   try {
     const token =
@@ -346,6 +346,7 @@ router.get("/:lectureId/video/streaming", async (req, res, next) => {
       });
       const section = await Section.findOne({
         where: {
+          isHidden: false,
           id: lecture?.sectionId,
         },
       });
@@ -357,52 +358,32 @@ router.get("/:lectureId/video/streaming", async (req, res, next) => {
       });
       const video = await Video.findOne({
         where: {
+          isHidden: false,
           lectureId: req.params.lectureId,
         },
       });
       if (enrollments.length) {
         const extension = video?.fileName.split(".")[1];
-
-        const metaDataParams = {
-          Bucket: "cnht-main-bucket",
-          Key: video?.id + "." + extension,
+        const file = bucket.file(video!.id + "." + extension);
+        const config = {
+          action: "read" as const,
+          expires: moment(new Date()).add(1, "day").format("MM-DD-YYYY"),
+          accessibleAt: moment(new Date()).format("MM-DD-YYYY"),
         };
-        const range = req.headers.range;
-        const metaData = await s3.headObject(metaDataParams).promise();
-        const fileSize = metaData.ContentLength;
 
-        if (range) {
-          const parts = range.replace(/bytes=/, "").split("-");
-          const start = parseInt(parts[0], 10);
-          const end = parts[1] ? parseInt(parts[1], 10) : fileSize! - 1;
-          const chunksize = end - start + 1;
-
-          const head = {
-            "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-            "Accept-Ranges": "bytes",
-            "Content-Length": chunksize,
-            "Content-Type": "video/mp4",
-          };
-          const streamParams = {
-            Bucket: "cnht-main-bucket",
-            Key: video?.id + "." + extension,
-            Range: range,
-          };
-
-          res.writeHead(206, head);
-          return s3.getObject(streamParams).createReadStream().pipe(res);
-        } else {
-          const head = {
-            "Content-Length": fileSize,
-            "Content-Type": "video/mp4",
-          };
-          res.writeHead(200, head);
-          const streamParams = {
-            Bucket: "cnht-main-bucket",
-            Key: video?.id + "." + extension,
-          };
-          return s3.getObject(streamParams).createReadStream().pipe(res);
-        }
+        file.getSignedUrl(config, (error, url) => {
+          if (error) {
+            res.status(500).json({
+              message: error.message,
+              signedUrl: null,
+            });
+          } else {
+            res.status(200).json({
+              message: "Get signed url successfully",
+              signedUrl: url,
+            });
+          }
+        });
       }
       // Learner not purchase
       else {
@@ -451,6 +432,197 @@ router.put("/:lectureId/video/length", requireAuth, async (req, res, next) => {
     } catch (error) {
       res.status(500).json({
         message: log(error.message),
+      });
+    }
+  });
+});
+
+// GET method: get video model
+router.get("/:lectureId/video", async (req, res, next) => {
+  try {
+    const videoModel = await Video.findOne({
+      where: {
+        isHidden: false,
+        lectureId: req.params.lectureId,
+      },
+    });
+    if (videoModel) {
+      res.status(200).json({
+        message: log("Get video model successfully"),
+        count: 1,
+        video: videoModel,
+      });
+    } else {
+      res.status(404).json({
+        message: log("Video model not found"),
+        count: 0,
+        video: null,
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      message: log(error.message),
+      count: 0,
+      video: null,
+    });
+  }
+});
+
+// PUT method: move a lecture down
+router.put("/:lectureId/down", requireAuth, async (req, res, next) => {
+  requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
+    const sectionId = req.body.sectionId;
+    const lecture = await Lecture.findOne({
+      where: {
+        isHidden: false,
+        id: req.params.lectureId,
+      },
+    });
+    if (lecture) {
+      const lectures = await Lecture.findAll({
+        where: {
+          isHidden: false,
+          sectionId: sectionId,
+        },
+      });
+      lectures.sort((a, b) => a.lectureOrder - b.lectureOrder);
+      if (lecture.sectionId === sectionId) {
+        if (lectures.length) {
+          const index = lectures.findIndex((e) => e.id === lecture.id);
+          const tempOrder = lecture.lectureOrder;
+          lecture.lectureOrder = lectures[index + 1].lectureOrder;
+          lectures[index + 1].lectureOrder = tempOrder;
+          await lectures[index + 1].save();
+          await lectures[index + 1].reload();
+          await lecture.save();
+          await lecture.reload();
+          res.status(200).json({
+            message: log("Move lecture down successfully"),
+          });
+        } else {
+          res.status(404).json({
+            message: log("No lecture found"),
+          });
+        }
+      } else {
+        lecture.sectionId = sectionId;
+        await lecture.save();
+        await lecture.reload();
+
+        for (let i = 0; i < lectures.length; i++) {
+          if (i === 0) {
+            if (lecture.lectureOrder > lectures[i].lectureOrder) {
+              const tempOrder = lectures[i].lectureOrder;
+              lectures[i].lectureOrder = lecture.lectureOrder;
+              lecture.lectureOrder = tempOrder;
+              await lectures[i].save();
+              await lectures[i].reload();
+              await lecture.save();
+              await lecture.reload();
+            } else {
+              break;
+            }
+          } else {
+            if (lectures[i].lectureOrder < lectures[i - 1].lectureOrder) {
+              const tempOrder = lectures[i].lectureOrder;
+              lectures[i].lectureOrder = lectures[i - 1].lectureOrder;
+              lectures[i - 1].lectureOrder = tempOrder;
+              await lectures[i].save();
+              await lectures[i].reload();
+              await lectures[i - 1].save();
+              await lectures[i - 1].reload();
+            } else {
+              break;
+            }
+          }
+        }
+        res.status(200).json({
+          message: log("Move lecture down successfully"),
+        });
+      }
+    } else {
+      res.status(404).json({
+        message: log("No lecture found"),
+      });
+    }
+  });
+});
+
+// PUT method: move a lecture up
+router.put("/:lectureId/up", requireAuth, async (req, res, next) => {
+  requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
+    const sectionId = req.body.sectionId;
+    const lecture = await Lecture.findOne({
+      where: {
+        isHidden: false,
+        id: req.params.lectureId,
+      },
+    });
+    if (lecture) {
+      const lectures = await Lecture.findAll({
+        where: {
+          isHidden: false,
+          sectionId: sectionId,
+        },
+      });
+      lectures.sort((a, b) => a.lectureOrder - b.lectureOrder);
+      if (lecture.sectionId === sectionId) {
+        if (lectures.length) {
+          const index = lectures.findIndex((e) => e.id === lecture.id);
+          const tempOrder = lecture.lectureOrder;
+          lecture.lectureOrder = lectures[index - 1].lectureOrder;
+          lectures[index - 1].lectureOrder = tempOrder;
+          await lectures[index - 1].save();
+          await lectures[index - 1].reload();
+          await lecture.save();
+          await lecture.reload();
+          res.status(200).json({
+            message: log("Move lecture up successfully"),
+          });
+        } else {
+          res.status(404).json({
+            message: log("No lecture found"),
+          });
+        }
+      } else {
+        lecture.sectionId = sectionId;
+        await lecture.save();
+        await lecture.reload();
+
+        for (let i = lectures.length - 1; i >= 0; i--) {
+          if (i === lectures.length - 1) {
+            if (lecture.lectureOrder < lectures[i].lectureOrder) {
+              const tempOrder = lectures[i].lectureOrder;
+              lectures[i].lectureOrder = lecture.lectureOrder;
+              lecture.lectureOrder = tempOrder;
+              await lectures[i].save();
+              await lectures[i].reload();
+              await lecture.save();
+              await lecture.reload();
+            } else {
+              break;
+            }
+          } else {
+            if (lectures[i].lectureOrder > lectures[i + 1].lectureOrder) {
+              const tempOrder = lectures[i].lectureOrder;
+              lectures[i].lectureOrder = lectures[i + 1].lectureOrder;
+              lectures[i + 1].lectureOrder = tempOrder;
+              await lectures[i].save();
+              await lectures[i].reload();
+              await lectures[i + 1].save();
+              await lectures[i + 1].reload();
+            } else {
+              break;
+            }
+          }
+        }
+        res.status(200).json({
+          message: log("Move lecture up successfully"),
+        });
+      }
+    } else {
+      res.status(404).json({
+        message: log("No lecture found"),
       });
     }
   });
