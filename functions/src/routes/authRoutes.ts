@@ -1,7 +1,9 @@
 import express, { Router, Request, Response, NextFunction } from "express";
-import { log } from "../utils";
+import { log, momentFormat } from "../utils";
 import requireAuth from "../middleware/requireAuth";
-import User from "../models/user";
+import db from "../database/firestoreConnection";
+import { v4 as uuidv4 } from "uuid";
+import { ROLES } from "../types";
 
 // Define route
 const router: Router = express.Router();
@@ -10,28 +12,42 @@ router.use(requireAuth);
 // POST method: Sign in && create new user if not existed
 router.post("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    let user = await User.findOne({
-      where: {
-        email: req.body.decodedUser.email,
-      },
-    });
+    const createdAt = momentFormat();
+    const updatedAt = momentFormat();
+    const snapshot = await db
+      .collection("users")
+      .where("isHidden", "==", false)
+      .where("email", "==", req.body.decodedUser.email)
+      .get();
 
-    // If user not found
-    if (!user) {
-      log(`User ${req.body.email} not found. New user will be created now`);
-      // Create new user
+    // If user not found, create new
+    if (!snapshot.docs[0]) {
       try {
-        const newUser = await User.create({
+        const id = uuidv4();
+        const newUser = await db.collection("users").doc(id).set({
+          id: id,
           email: req.body.decodedUser.email,
           fullName: req.body.decodedUser.name,
           avatarUrl: req.body.decodedUser.picture,
+          userRole: ROLES.LEARNER,
+          balance: 0,
+          isHidden: false,
+          createdAt: createdAt,
+          updatedAt: updatedAt,
         });
         if (newUser) {
-          await newUser.reload();
           return res.status(201).json({
             message: "Create new user successfully",
             count: 1,
-            user: newUser,
+            user: {
+              id: id,
+              email: req.body.decodedUser.email,
+              fullName: req.body.decodedUser.name,
+              avatarUrl: req.body.decodedUser.picture,
+              userRole: ROLES.LEARNER,
+              balance: 0,
+              isHidden: false,
+            },
             token: req.headers.authorization,
           });
         } else {
@@ -42,7 +58,6 @@ router.post("/", async (req: Request, res: Response, next: NextFunction) => {
           });
         }
       } catch (error) {
-        console.log(error.message);
         return res.status(500).json({
           message: error.message,
           user: null,
@@ -52,13 +67,17 @@ router.post("/", async (req: Request, res: Response, next: NextFunction) => {
     }
     // If user existed, then sign in
     if (req.query.userRole) {
+      let user = snapshot.docs[0].data();
       if (user.userRole === req.query.userRole) {
-        // update avatar url & fullName
+        await db.collection("users").doc(user.id).update({
+          avatarUrl: req.body.decodedUser.picture,
+          fullName: req.body.decodedUser.name,
+          updatedAt: updatedAt,
+        });
         user.avatarUrl = req.body.decodedUser.picture;
         user.fullName = req.body.decodedUser.name;
-        await user.save();
         return res.status(200).json({
-          user,
+          user: user,
           token: req.headers.authorization,
         });
       } else {
@@ -74,7 +93,6 @@ router.post("/", async (req: Request, res: Response, next: NextFunction) => {
       });
     }
   } catch (error) {
-    log(error.message);
     res.status(500).json({
       message: log(error.message),
     });

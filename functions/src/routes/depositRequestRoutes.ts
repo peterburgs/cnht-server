@@ -1,13 +1,12 @@
 import express, { Router, Request, Response, NextFunction } from "express";
-import { log } from "../utils";
+import { log, momentFormat } from "../utils";
 import { ROLES, STATUSES } from "../types";
-import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
-import DepositRequest from "../models/depositRequest";
 import { v4 as uuidv4 } from "uuid";
 import { Storage } from "@google-cloud/storage";
 import path from "path";
+import db from "../database/firestoreConnection";
 
 // Define router
 const router: Router = express.Router();
@@ -66,15 +65,23 @@ router.post(
         const extension = (fileName! as string).split(".")[1];
         const fileInBucket = bucket.file(_id + "." + extension);
         await fileInBucket.save(completeFile);
-
-        const depositRequest = await DepositRequest.findOne({
-          where: {
-            id: req.params.depositRequestId,
-          },
-        });
-        if (depositRequest) {
+        const snapshot = await db
+          .collection("depositRequests")
+          .where("isHidden", "==", false)
+          .where("id", "==", req.params.depositRequestId)
+          .get();
+        if (snapshot.docs.length) {
+          const updatedAt = momentFormat();
+          let depositRequest = snapshot.docs[0].data();
+          const depositRequestToUpdate = await db
+            .collection("depositRequests")
+            .doc(depositRequest.id)
+            .update({
+              imageUrl: `/api/deposit-requests/images/${_id}.${extension}`,
+              updatedAt: updatedAt,
+            });
           depositRequest.imageUrl = `/api/deposit-requests/images/${_id}.${extension}`;
-          await depositRequest.save();
+          depositRequest.updatedAt = updatedAt;
           return res.status(201).json({
             message: "Image uploaded",
             depositRequest: depositRequest,
@@ -116,16 +123,36 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.LEARNER], req, res, next, async (req, res, next) => {
       try {
-        const depositRequest = await DepositRequest.create({
-          learnerId: req.body.learnerId,
-          amount: req.body.amount,
-        });
+        const createdAt = momentFormat();
+        const updatedAt = momentFormat();
+        const id = uuidv4();
+        const depositRequest = await db
+          .collection("depositRequests")
+          .doc(id)
+          .set({
+            id: id,
+            learnerId: req.body.learnerId,
+            amount: req.body.amount,
+            depositRequestStatus: STATUSES.PENDING,
+            imageUrl: "",
+            isHidden: false,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+          });
         if (depositRequest) {
-          await depositRequest.reload();
           res.status(201).json({
             message: log("Create new deposit request successfully"),
             count: 1,
-            depositRequest: depositRequest,
+            depositRequest: {
+              id: id,
+              learnerId: req.body.learnerId,
+              amount: req.body.amount,
+              depositRequestStatus: STATUSES.PENDING,
+              imageUrl: "",
+              isHidden: false,
+              createdAt: createdAt,
+              updatedAt: updatedAt,
+            },
           });
         } else {
           res.status(500).json({
@@ -158,24 +185,35 @@ router.get(
       next,
       async (req, res, next) => {
         try {
-          // Create filter from request query
-          let reqParams: { [key: string]: string }[] = [];
-          for (let [key, value] of Object.entries(req.query)) {
-            reqParams.push({ [key]: String(value) });
-          }
-
-          // Find deposits from filter
-          const depositRequests = await DepositRequest.findAll({
-            where: {
-              [Op.and]: reqParams,
-            },
-          });
-          if (depositRequests.length) {
-            res.status(200).json({
-              message: log("Deposit requests found"),
-              count: depositRequests.length,
-              depositRequests: depositRequests,
-            });
+          const id = req.query.id;
+          const learnerId = req.query.learnerId;
+          const snapshot = await db
+            .collection("depositRequests")
+            .where("isHidden", "==", false)
+            .get();
+          if (snapshot.docs.length) {
+            let depositRequests = snapshot.docs.map((d) => d.data());
+            if (id) {
+              depositRequests = depositRequests.filter((d) => d.id === id);
+            }
+            if (learnerId) {
+              depositRequests = depositRequests.filter(
+                (d) => d.learnerId === learnerId
+              );
+            }
+            if (depositRequests.length) {
+              res.status(200).json({
+                message: log("Deposit requests found"),
+                count: depositRequests.length,
+                depositRequests: depositRequests,
+              });
+            } else {
+              res.status(404).json({
+                message: log("No deposit requests found"),
+                count: 0,
+                depositRequests: [],
+              });
+            }
           } else {
             res.status(404).json({
               message: log("No deposit requests found"),
@@ -195,7 +233,7 @@ router.get(
     );
   }
 );
-// PUT method: update a deposit request by PK
+// PUT method: update a deposit request by id
 
 router.put(
   "/:id",
@@ -203,19 +241,25 @@ router.put(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        // Find course by id
-        let depositRequest = await DepositRequest.findByPk(req.params.id);
-        if (depositRequest) {
-          // Update
-          depositRequest.depositRequestStatus = req.body.depositRequestStatus;
-          // Save
-          await depositRequest.save();
-          // Refresh from database
-          await depositRequest.reload();
+        const updatedAt = momentFormat();
+        const snapshot = await db
+          .collection("depositRequests")
+          .where("isHidden", "==", false)
+          .where("id", "==", req.params.id)
+          .get();
+        if (snapshot.docs.length) {
+          const depositRequest = snapshot.docs[0].data();
+          const depositRequestToUpdate = await db
+            .collection("depositRequests")
+            .doc(depositRequest.id)
+            .update({
+              depositRequestStatus: req.body.depositRequestStatus,
+              updatedAt: updatedAt,
+            });
           res.status(200).json({
             message: log("Update deposit request successfully"),
             count: 1,
-            depositRequest: depositRequest,
+            depositRequest: depositRequestToUpdate,
           });
         } else {
           res.status(404).json({

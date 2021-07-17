@@ -1,12 +1,11 @@
 import express, { Router, Request, Response, NextFunction } from "express";
-import { log } from "../utils";
+import { log, momentFormat } from "../utils";
 import { ROLES } from "../types";
-import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
-import Section from "../models/section";
-import Course from "../models/course";
-import Lecture from "../models/lecture";
+import db from "../database/firestoreConnection";
+import { v4 as uuidv4 } from "uuid";
+import moment from "moment";
 
 // Define router
 const router: Router = express.Router();
@@ -18,28 +17,42 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        const course = await Course.findOne({
-          where: {
-            isHidden: false,
-            id: req.body.courseId,
-          },
-        });
-        if (course) {
-          course.sectionCount += 1;
-          await course.save();
-          await course.reload();
-          const section = await Section.create({
+        const sectionId = uuidv4();
+        const courseSnapshot = await db
+          .collection("courses")
+          .where("isHidden", "==", false)
+          .where("id", "==", req.body.courseId)
+          .get();
+        if (courseSnapshot.docs.length) {
+          const course = courseSnapshot.docs[0].data();
+          const sectionCount = course.sectionCount + 1;
+          await db.collection("courses").doc(course.id).update({
+            sectionCount: sectionCount,
+          });
+          const createdAt = momentFormat();
+          const updatedAt = momentFormat();
+          const section = await db.collection("sections").doc(sectionId).set({
+            id: sectionId,
             title: req.body.title,
             courseId: req.body.courseId,
-            sectionOrder: course.sectionCount,
+            sectionOrder: sectionCount,
+            isHidden: false,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
           });
           if (section) {
-            await section.reload();
-
             res.status(201).json({
               message: log("Create new section successfully"),
               count: 1,
-              section: section,
+              section: {
+                id: sectionId,
+                title: req.body.title,
+                courseId: req.body.courseId,
+                sectionOrder: sectionCount,
+                isHidden: false,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              },
             });
           } else {
             res.status(500).json({
@@ -71,19 +84,23 @@ router.post(
 // GET method: get sections by filters
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Create filter from request query
-    let reqParams: { [key: string]: string }[] = [];
-    for (let [key, value] of Object.entries(req.query)) {
-      reqParams.push({ [key]: String(value) });
+    const sectionSnapShot = await db
+      .collection("sections")
+      .where("isHidden", "==", false)
+      .get();
+    const sections = sectionSnapShot.docs.map((section) => section.data());
+    const sectionId = req.query.sectionId;
+    const title = req.query.title;
+    const courseId = req.query.courseId;
+    if (sectionId) {
+      sections.filter((section) => section.id == sectionId);
     }
-
-    // Find course from filter
-    const sections = await Section.findAll({
-      where: {
-        isHidden: false,
-        [Op.and]: reqParams,
-      },
-    });
+    if (title) {
+      sections.filter((section) => section.title == title);
+    }
+    if (courseId) {
+      sections.filter((section) => section.courseId == courseId);
+    }
     if (sections.length) {
       res.status(200).json({
         message: log("Sections found"),
@@ -114,16 +131,21 @@ router.put(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        // Find section by id
-        let section = await Section.findByPk(req.params.id);
+        const sectionId = req.params.id;
+        const snapshot = await db
+          .collection("sections")
+          .where("isHidden", "==", false)
+          .where("id", "==", sectionId)
+          .get();
+        let section = snapshot.docs[0].data();
         if (section) {
-          // Update
+          const updatedAt = momentFormat();
+          await db.collection("sections").doc(sectionId).update({
+            title: req.body.title,
+            updatedAt: updatedAt,
+          });
           section.title = req.body.title;
-          section.sectionOrder = req.body.sectionOrder;
-          // Save
-          await section.save();
-          // Refresh from database
-          await section.reload();
+          section.updatedAt = updatedAt;
           res.status(200).json({
             message: log("Update section successfully"),
             count: 1,
@@ -155,15 +177,18 @@ router.delete(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        // Find section by id
-        let section = await Section.findByPk(req.params.id);
-        if (section) {
-          // Mark as hidden
-          section.isHidden = true;
-          // Save
-          await section.save();
-          // Refresh from database
-          await section.reload();
+        const snapshot = await db
+          .collection("sections")
+          .where("isHidden", "==", false)
+          .where("id", "==", req.params.id)
+          .get();
+        if (snapshot.docs.length) {
+          const updatedAt = momentFormat();
+          const section = snapshot.docs[0].data();
+          await db.collection("sections").doc(req.params.id).update({
+            isHidden: true,
+            updatedAt: updatedAt,
+          });
           res.status(200).json({
             message: log("Delete section successfully"),
           });
@@ -185,35 +210,53 @@ router.delete(
 // PUT method: move a section down
 router.put("/:sectionId/down", requireAuth, async (req, res, next) => {
   requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
-    let section = await Section.findOne({
-      where: {
-        isHidden: false,
-        id: req.params.sectionId,
-      },
-    });
-    if (section) {
-      let sections = await Section.findAll({
-        where: {
-          isHidden: false,
-          courseId: section.courseId,
-        },
-      });
+    const snapshot = await db
+      .collection("sections")
+      .where("isHidden", "==", false)
+      .where("id", "==", req.params.sectionId)
+      .get();
+    if (snapshot.docs.length) {
+      const updatedAt = momentFormat();
+      const section = snapshot.docs[0].data();
+      const sectionsSnapshot = await db
+        .collection("sections")
+        .where("isHidden", "==", false)
+        .where("courseId", "==", section.courseId)
+        .get();
+      const sections = sectionsSnapshot.docs.map((section) => section.data());
+      sections.sort((a, b) => a.sectionOrder - b.sectionOrder);
       if (sections.length) {
-        sections.sort((a, b) => a.sectionOrder - b.sectionOrder);
-        const index = sections.findIndex((e) => e.id === section!.id);
-        const tempOrder = section.sectionOrder;
-        section.sectionOrder = sections[index + 1].sectionOrder;
-        sections[index + 1].sectionOrder = tempOrder;
-        await sections[index + 1].save();
-        await sections[index + 1].reload();
-        await section.save();
-        await section.reload();
-        res.status(200).json({
-          message: log("Move section down successfully"),
-        });
+        const sectionIndex = sections.findIndex((s) => s.id == section.id);
+        if (sectionIndex === sections.length - 1) {
+          res.status(400).json({
+            message: log("This section is already on bottom, cannot move down"),
+          });
+        } else {
+          const index = sections.findIndex((e) => e.id === section!.id);
+          const tempOrder = section.sectionOrder;
+          await db
+            .collection("sections")
+            .doc(section.id)
+            .update({
+              sectionOrder: sections[index + 1].sectionOrder,
+              updatedAt: updatedAt,
+            });
+          await db
+            .collection("sections")
+            .doc(sections[index + 1].id)
+            .update({
+              sectionOrder: tempOrder,
+              updatedAt: updatedAt,
+            });
+          res.status(200).json({
+            message: log("Move section down successfully"),
+          });
+        }
       } else {
         res.status(404).json({
-          message: log("Section not found"),
+          message: log(
+            "Cannot move section down since no section found or only one section existed"
+          ),
         });
       }
     } else {
@@ -227,32 +270,49 @@ router.put("/:sectionId/down", requireAuth, async (req, res, next) => {
 // PUT method: move a section up
 router.put("/:sectionId/up", requireAuth, async (req, res, next) => {
   requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
-    let section = await Section.findOne({
-      where: {
-        isHidden: false,
-        id: req.params.sectionId,
-      },
-    });
-    if (section) {
-      let sections = await Section.findAll({
-        where: {
-          isHidden: false,
-          courseId: section.courseId,
-        },
-      });
+    const sectionId = req.params.sectionId;
+    const sectionSnapShot = await db
+      .collection("sections")
+      .where("isHidden", "==", false)
+      .where("id", "==", sectionId)
+      .get();
+    if (sectionSnapShot.docs.length) {
+      const updatedAt = momentFormat();
+      const section = sectionSnapShot.docs[0].data();
+      const sectionsSnapshot = await db
+        .collection("sections")
+        .where("isHidden", "==", false)
+        .where("courseId", "==", section.courseId)
+        .get();
+      const sections = sectionsSnapshot.docs.map((section) => section.data());
+      sections.sort((a, b) => a.sectionOrder - b.sectionOrder);
       if (sections.length) {
-        sections.sort((a, b) => a.sectionOrder - b.sectionOrder);
-        const index = sections.findIndex((e) => e.id === section!.id);
-        const tempOrder = section.sectionOrder;
-        section.sectionOrder = sections[index - 1].sectionOrder;
-        sections[index - 1].sectionOrder = tempOrder;
-        await sections[index - 1].save();
-        await sections[index - 1].reload();
-        await section.save();
-        await section.reload();
-        res.status(200).json({
-          message: log("Move section up successfully"),
-        });
+        const sectionIndex = sections.findIndex((s) => s.id == section.id);
+        if (sectionIndex == 0) {
+          res.status(400).json({
+            message: log("This section is already on top, cannot move up"),
+          });
+        } else {
+          const index = sections.findIndex((e) => e.id === section!.id);
+          const tempOrder = section.sectionOrder;
+          await db
+            .collection("sections")
+            .doc(section.id)
+            .update({
+              sectionOrder: sections[index - 1].sectionOrder,
+              updatedAt: updatedAt,
+            });
+          await db
+            .collection("sections")
+            .doc(sections[index - 1].id)
+            .update({
+              sectionOrder: tempOrder,
+              updatedAt: updatedAt,
+            });
+          res.status(200).json({
+            message: log("Move section up successfully"),
+          });
+        }
       } else {
         res.status(404).json({
           message: log("Section not found"),
@@ -268,18 +328,33 @@ router.put("/:sectionId/up", requireAuth, async (req, res, next) => {
 
 // GET method: get all lectures of a section by section id
 router.get("/:sectionId/lectures", async (req, res, next) => {
-  const lectures = await Lecture.findAll({
-    where: {
-      isHidden: false,
-      sectionId: req.params.sectionId,
-    },
-  });
-  if (lectures.length) {
-    lectures.sort((a, b) => a.lectureOrder - b.lectureOrder);
-    res.status(200).json({
-      message: log("Get lectures successfully"),
-      count: lectures.length,
-      lectures: lectures,
+  try {
+    const sectionId = req.params.sectionId;
+    const snapshot = await db
+      .collection("sections")
+      .where("isHidden", "==", false)
+      .where("sectionId", "==", sectionId)
+      .get();
+    if (snapshot.docs.length) {
+      const lectures = snapshot.docs.map((lecture) => lecture.data());
+      lectures.sort((a, b) => a.lectureOrder - b.lectureOrder);
+      res.status(200).json({
+        message: log("Get lectures successfully"),
+        count: lectures.length,
+        lectures: lectures,
+      });
+    } else {
+      res.status(404).json({
+        message: log("No lecture found"),
+        count: 0,
+        lectures: null,
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      message: log(error.message),
+      count: 0,
+      lectures: null,
     });
   }
 });

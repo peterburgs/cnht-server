@@ -1,10 +1,10 @@
 import express, { Router, Request, Response, NextFunction } from "express";
-import { log } from "../utils";
+import { log, momentFormat } from "../utils";
 import { ROLES } from "../types";
-import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
-import Comment from "../models/comment";
+import db from "../database/firestoreConnection";
+import { v4 as uuidv4 } from "uuid";
 
 // Define router
 const router: Router = express.Router();
@@ -21,19 +21,34 @@ router.post(
       next,
       async (req, res, next) => {
         try {
-          const comment = await Comment.create({
+          const id = uuidv4();
+          const createdAt = momentFormat();
+          const updatedAt = momentFormat();
+          const comment = await db.collection("comments").doc(id).set({
+            id: id,
             commentText: req.body.commentText,
             parentId: req.body.parentId,
             userId: req.body.userId,
             lectureId: req.body.lectureId,
-            isHidden: req.body.isHidden,
+            isHidden: false,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
           });
+
           if (comment) {
-            await comment.reload();
             res.status(201).json({
               message: log("Create new comment successfully"),
               count: 1,
-              comment: comment,
+              comment: {
+                id: id,
+                commentText: req.body.commentText,
+                parentId: req.body.parentId,
+                userId: req.body.userId,
+                lectureId: req.body.lectureId,
+                isHidden: false,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              },
             });
           } else {
             res.status(500).json({
@@ -67,25 +82,31 @@ router.get(
       next,
       async (req, res, next) => {
         try {
-          // Create filter from request query
-          let reqParams: { [key: string]: string }[] = [];
-          for (let [key, value] of Object.entries(req.query)) {
-            reqParams.push({ [key]: String(value) });
-          }
-
-          // Find comments from filter
-          const comments = await Comment.findAll({
-            where: {
-              isHidden: false,
-              [Op.and]: reqParams,
-            },
-          });
-          if (comments.length) {
-            res.status(200).json({
-              message: log("comments found"),
-              count: comments.length,
-              comments: comments,
-            });
+          const lectureId = req.query.lectureId;
+          const snapshot = await db
+            .collection("comments")
+            .where("isHidden", "==", false)
+            .get();
+          if (snapshot.docs.length) {
+            let comments = snapshot.docs.map((comment) => comment.data());
+            if (lectureId) {
+              comments = comments.filter(
+                (comment) => comment.lectureId == lectureId
+              );
+            }
+            if (comments.length) {
+              res.status(200).json({
+                message: log("comments found"),
+                count: comments.length,
+                comments: comments,
+              });
+            } else {
+              res.status(404).json({
+                message: log("No comments found"),
+                count: 0,
+                comments: [],
+              });
+            }
           } else {
             res.status(404).json({
               message: log("No comments found"),
@@ -113,27 +134,36 @@ router.delete(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        // Find lecture by id
-        let parentComment = await Comment.findByPk(req.params.id);
-        if (parentComment) {
-          // Mark as hidden
-          parentComment.isHidden = true;
-          // Save
-          await parentComment.save();
-          // Refresh from database
-          await parentComment.reload();
-          const childrenComments = await Comment.findAll({
-            where: {
-              isHidden: false,
-              parentId: req.body.id,
-            },
+        const updatedAt = momentFormat();
+        const commentId = req.params.id;
+        const snapshot = await db
+          .collection("comments")
+          .where("isHidden", "==", false)
+          .where("id", "==", commentId)
+          .get();
+        if (snapshot.docs.length) {
+          await db.collection("comments").doc(commentId).update({
+            isHidden: true,
+            updatedAt: updatedAt,
           });
-          if (childrenComments) {
+          const childrenCommentSnapshot = await db
+            .collection("comments")
+            .where("isHidden", "==", false)
+            .where("parentId", "==", commentId)
+            .get();
+
+          if (childrenCommentSnapshot.docs.length) {
+            const childrenComments = childrenCommentSnapshot.docs.map((child) =>
+              child.data()
+            );
             for (let i = 0; i < childrenComments.length; i++) {
-              const element = childrenComments[i];
-              element.isHidden = true;
-              await element.save();
-              await element.reload();
+              await db
+                .collection("comments")
+                .doc(childrenComments[i].id)
+                .update({
+                  isHidden: true,
+                  updatedAt: updatedAt,
+                });
             }
             res.status(200).json({
               message: log("Delete comments successfully"),

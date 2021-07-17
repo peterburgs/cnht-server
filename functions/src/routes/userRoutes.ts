@@ -1,18 +1,15 @@
 import express, { Router, Request, Response, NextFunction } from "express";
 import { log } from "../utils";
-import { ROLES } from "../types";
-import { Op, Model } from "sequelize";
+import { ROLES, User } from "../types";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
-
-// Define router
+import db from "../database/firestoreConnection";
+import moment from "moment";
 const router: Router = express.Router();
 
-// Models
-import User from "../models/user";
 router.use(requireAuth);
 
-// GET method: get users by filters
+// GET method: get all users
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   requireRole(
     [ROLES.ADMIN, ROLES.LEARNER],
@@ -21,18 +18,13 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     next,
     async (req, res, next) => {
       try {
-        // Create filter from request query
-        let reqParams: { [key: string]: string }[] = [];
-        for (let [key, value] of Object.entries(req.query)) {
-          reqParams.push({ [key]: String(value) });
-        }
-        // Find user from filter
-        const users = await User.findAll({
-          where: {
-            [Op.and]: reqParams,
-          },
-        });
-        if (users.length) {
+        const snapshot = await db
+          .collection("users")
+          .where("isHidden", "==", false)
+          .get();
+        console.log(snapshot);
+        if (snapshot.docs[0].exists) {
+          const users = snapshot.docs.map((doc) => doc.data());
           res.status(200).json({
             message: log("User found"),
             count: users.length,
@@ -66,21 +58,24 @@ router.put("/:id", async (req: Request, res: Response, next: NextFunction) => {
     next,
     async (req, res, next) => {
       try {
-        // Find user by id
-        let user = await User.findByPk(req.params.id);
-        if (user) {
-          // Update
-          user.email = req.body.email;
-          user.balance = req.body.balance;
-
-          // Save
-          await user.save();
-          // Refresh from database
-          await user.reload();
+        const id = req.params.id;
+        const snapshot = await db
+          .collection("users")
+          .where("id", "==", id)
+          .get();
+        const updatedAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
+        if (snapshot.docs[0].exists) {
+          await db.collection("users").doc(`${id}`).update({
+            balance: req.body.balance,
+            updatedAt: updatedAt,
+          });
+          let userToUpdate = snapshot.docs[0].data();
+          userToUpdate.balance = req.body.balance;
+          userToUpdate.updatedAt = updatedAt;
           res.status(200).json({
             message: log("Update user successfully"),
             count: 1,
-            user,
+            user: userToUpdate,
           });
         } else {
           res.status(404).json({
@@ -100,7 +95,5 @@ router.put("/:id", async (req: Request, res: Response, next: NextFunction) => {
     }
   );
 });
-
-// DELETE method:
 
 export default router;

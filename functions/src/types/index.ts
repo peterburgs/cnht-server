@@ -27,6 +27,7 @@ export interface User {
   balance: number;
   createdAt: Date;
   updatedAt: Date;
+  isHidden: boolean;
 }
 
 export interface Course {
@@ -41,6 +42,7 @@ export interface Course {
   lectureCount: number;
   thumbnailUrl: string;
   isHidden: boolean;
+  isPublished: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -69,6 +71,7 @@ export interface Enrollment {
   courseId: string;
   createdAt: Date;
   updatedAt: Date;
+  isHidden: boolean;
 }
 
 export interface Comment {
@@ -90,6 +93,7 @@ export interface DepositRequest {
   depositRequestStatus: STATUSES;
   createdAt: Date;
   updatedAt: Date;
+  isHidden: boolean;
 }
 
 export interface Video {

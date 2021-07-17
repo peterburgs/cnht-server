@@ -1,25 +1,10 @@
-import { log } from "./utils";
 import express, { Request, Response, NextFunction, Application } from "express";
 import cors from "cors";
 import * as dotenv from "dotenv";
 import morgan from "morgan";
-import AWS from "aws-sdk";
 import * as functions from "firebase-functions";
 dotenv.config();
-const port = 3001;
 const app: Application = express();
-// config wasabi
-const credentials = new AWS.SharedIniFileCredentials({
-  profile: "wasabi",
-});
-AWS.config.credentials = credentials;
-AWS.config.credentials.accessKeyId = process.env.WSB_ACCESS_ID!;
-AWS.config.credentials.secretAccessKey = process.env.WSB_SECRET_KEY!;
-AWS.config.region = "ap-northeast-1";
-
-// Connect to MySQL
-import sequelize from "./database/connection";
-// global.sequelize = sequelize;
 
 // Import Routes
 import userRoutes from "./routes/userRoutes";
@@ -30,13 +15,15 @@ import lectureRoutes from "./routes/lectureRoutes";
 import enrollmentRoutes from "./routes/enrollmentRoutes";
 import commentRoutes from "./routes/commentRoutes";
 import depositRequestRoutes from "./routes/depositRequestRoutes";
-import imageRoutes from "./routes/imageRoutes";
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(
   morgan("Method=:method |URL= :url |Status= :status | :response-time ms\n")
 );
+
+// Database
 
 // Prevent CORS errors
 app.use(cors());
@@ -72,7 +59,6 @@ app.use("/api/lectures", lectureRoutes);
 app.use("/api/enrollments", enrollmentRoutes);
 app.use("/api/comments", commentRoutes);
 app.use("/api/deposit-requests", depositRequestRoutes);
-app.use("/api/images", imageRoutes);
 
 // Handle 404 error
 app.use((req: Request, res: Response, next: NextFunction) => {
