@@ -8,3 +8,6 @@ export function log(message: string) {
   console.log(res + "\n");
   return message;
 }
+export function momentFormat() {
+  return moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
+}

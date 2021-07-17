@@ -1,20 +1,14 @@
 import express, { Router, Request, Response, NextFunction } from "express";
-import { log } from "../utils";
+import { log, momentFormat } from "../utils";
 import { ROLES } from "../types";
-import { Op, Model } from "sequelize";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
-import Video from "../models/video";
-import Enrollment from "../models/enrollment";
-import Course from "../models/course";
-import Section from "../models/section";
-import Lecture from "../models/lecture";
-import User from "../models/user";
 import { v4 as uuidv4 } from "uuid";
 import { auth, OAuth2Client } from "google-auth-library";
 import { Storage } from "@google-cloud/storage";
 import path from "path";
 import moment from "moment";
+import db from "../database/firestoreConnection";
 
 const client = new OAuth2Client(process.env.CLIENT_ID);
 
@@ -37,33 +31,52 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        const course = await Course.findOne({
-          where: {
-            isHidden: false,
-            id: req.body.courseId,
-          },
-        });
-        if (course) {
-          course.lectureCount += 1;
-          await course.save();
-          await course.reload();
-          const lecture = await Lecture.create({
+        const courseSnapshot = await db
+          .collection("courses")
+          .where("isHidden", "==", false)
+          .where("id", "==", req.body.courseId)
+          .get();
+        if (courseSnapshot.docs.length) {
+          const updatedAt = momentFormat();
+          const createdAt = momentFormat();
+          const course = courseSnapshot.docs[0].data();
+          await db
+            .collection("courses")
+            .doc(course.id)
+            .update({
+              lectureCount: course.lectureCount + 1,
+              updatedAt: updatedAt,
+            });
+          const id = uuidv4();
+          const lecture = await db.collection("lectures").doc(id).set({
+            id: id,
             title: req.body.title,
             sectionId: req.body.sectionId,
             lectureOrder: course.lectureCount,
+            isHidden: false,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
           });
           if (lecture) {
-            await lecture.reload();
             res.status(201).json({
               message: log("Create new lecture successfully"),
               count: 1,
-              lecture: lecture,
+              lecture: {
+                id: id,
+                title: req.body.title,
+                sectionId: req.body.sectionId,
+                lectureOrder: course.lectureCount,
+                isHidden: false,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              },
             });
           } else {
             res.status(500).json({
               message: log("Cannot create lecture"),
               count: 0,
               lecture: null,
+              course: null,
             });
           }
         } else {
@@ -71,6 +84,7 @@ router.post(
             message: log("Course not found"),
             count: 1,
             course: null,
+            lecture: null,
           });
         }
       } catch (error) {
@@ -79,6 +93,7 @@ router.post(
           message: log(error.message),
           count: 0,
           lecture: null,
+          course: null,
         });
       }
     });
@@ -88,19 +103,26 @@ router.post(
 // GET method: get lectures by filters
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Create filter from request query
-    let reqParams: { [key: string]: string }[] = [];
-    for (let [key, value] of Object.entries(req.query)) {
-      reqParams.push({ [key]: String(value) });
-    }
+    const snapshot = await db
+      .collection("lectures")
+      .where("isHidden", "==", false)
+      .get();
+    let lectures = snapshot.docs.map((lecture) => lecture.data());
+    const id = req.query.id;
+    const title = req.query.title;
+    const sectionId = req.query.sectionId;
 
-    // Find course from filter
-    const lectures = await Lecture.findAll({
-      where: {
-        isHidden: false,
-        [Op.and]: reqParams,
-      },
-    });
+    if (id) {
+      lectures = lectures.filter((lecture) => lecture.id === id);
+    }
+    if (title) {
+      lectures = lectures.filter((lecture) =>
+        lecture.title.toLowerCase().includes((title as string).toLowerCase())
+      );
+    }
+    if (sectionId) {
+      lectures = lectures.filter((lecture) => lecture.sectionId == sectionId);
+    }
     if (lectures.length) {
       res.status(200).json({
         message: log("Lectures found"),
@@ -131,17 +153,23 @@ router.put(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        // Find lecture by id
-        let lecture = await Lecture.findByPk(req.params.id);
-        if (lecture) {
-          // Update
+        const lectureId = req.params.id;
+        const snapshot = await db
+          .collection("lectures")
+          .where("isHidden", "==", false)
+          .where("id", "==", lectureId)
+          .get();
+        if (snapshot.docs.length) {
+          const updatedAt = momentFormat();
+          const lecture = snapshot.docs[0].data();
+          await db.collection("lectures").doc(lecture.id).update({
+            title: req.body.title,
+            updatedAt: updatedAt,
+          });
           lecture.title = req.body.title;
           lecture.sectionId = req.body.sectionId;
           lecture.lectureOrder = req.body.lectureOrder;
-          // Save
-          await lecture.save();
-          // Refresh from database
-          await lecture.reload();
+          lecture.updatedAt = updatedAt;
           res.status(200).json({
             message: "Update lecture successfully",
             count: 1,
@@ -173,15 +201,19 @@ router.delete(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        // Find lecture by id
-        let lecture = await Lecture.findByPk(req.params.id);
-        if (lecture) {
-          // Mark as hidden
-          lecture.isHidden = true;
-          // Save
-          await lecture.save();
-          // Refresh from database
-          await lecture.reload();
+        const lectureId = req.params.id;
+        const snapshot = await db
+          .collection("lectures")
+          .where("isHidden", "==", false)
+          .where("id", "==", lectureId)
+          .get();
+        if (snapshot.docs.length) {
+          const lecture = snapshot.docs[0].data();
+          const updatedAt = momentFormat();
+          await db.collection("lectures").doc(lecture.id).update({
+            isHidden: true,
+            updatedAt: updatedAt,
+          });
           res.status(200).json({
             message: log("Delete lecture successfully"),
           });
@@ -210,9 +242,12 @@ const googleAuth = async (token: string) => {
 };
 
 // POST: upload video
+// TODO: test upload video
 router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
   requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
     try {
+      console.log("initializing");
+      const lectureId = req.params.lectureId;
       const fileId = req.headers["x-content-id"];
       const chunkSize = Number(req.headers["x-chunk-length"]);
       const chunkId = Number(req.headers["x-chunk-id"]);
@@ -256,31 +291,45 @@ router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
         const fileInBucket = bucket.file(_id + "." + extension);
         await fileInBucket.save(completeFile);
 
-        const currentVideo = await Video.findOne({
-          where: {
-            isHidden: false,
-            lectureId: req.params.lectureId,
-          },
-        });
-        if (currentVideo) {
-          // mark hidden
-          currentVideo.isHidden = true;
-          await currentVideo.save();
-          await currentVideo.reload();
+        const snapshot = await db
+          .collection("videos")
+          .where("isHidden", "==", false)
+          .where("lectureId", "==", lectureId)
+          .get();
+        const createdAt = momentFormat();
+        const updatedAt = momentFormat();
+        if (snapshot.docs.length) {
+          const currentVideo = snapshot.docs[0].data();
 
-          // create new video to database
-          const video = await Video.create({
-            id: _id,
-            fileName: name + "." + extension,
-            size: fileSize,
-            lectureId: req.params.lectureId,
+          await db.collection("videos").doc(currentVideo.id).update({
+            isHidden: true,
+            updatedAt: updatedAt,
           });
+          const video = await db
+            .collection("videos")
+            .doc(_id)
+            .set({
+              id: _id,
+              fileName: name + "." + extension,
+              size: fileSize,
+              lectureId: lectureId,
+              isHidden: false,
+              createdAt: createdAt,
+              updatedAt: updatedAt,
+            });
           if (video) {
-            await video.reload();
             res.status(201).json({
               message: log("Update video successfully"),
               count: 1,
-              video: video,
+              video: {
+                id: _id,
+                fileName: name + "." + extension,
+                size: fileSize,
+                lectureId: lectureId,
+                isHidden: false,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              },
             });
           } else {
             res.status(500).json({
@@ -290,18 +339,31 @@ router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
             });
           }
         } else {
-          const video = await Video.create({
-            id: _id,
-            size: fileSize,
-            fileName: name + "." + extension,
-            lectureId: req.params.lectureId,
-          });
+          const video = await db
+            .collection("videos")
+            .doc(_id)
+            .set({
+              id: _id,
+              fileName: name + "." + extension,
+              size: fileSize,
+              lectureId: lectureId,
+              isHidden: false,
+              createdAt: createdAt,
+              updatedAt: updatedAt,
+            });
           if (video) {
-            await video.reload();
             res.status(201).json({
               message: log("Upload video successfully"),
               count: 1,
-              video: video,
+              video: {
+                id: _id,
+                fileName: name + "." + extension,
+                size: fileSize,
+                lectureId: lectureId,
+                isHidden: false,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              },
             });
           } else {
             res.status(500).json({
@@ -326,69 +388,111 @@ router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
 });
 
 // GET method: Get signed url to stream video
+// TODO: test streaming
 router.get("/:lectureId/video/streaming", async (req, res, next) => {
   try {
+    const lectureId = req.params.lectureId;
     const token =
       req.query
         .RGhqHqXSZfjAiyXgzznYnHSKRvxiHBWvzLZFZTUxXhRjvqsagFwHzfXuQPWcTQALWHqGKUPBFmuLWmKavtRvBWriLgXWtCAuDrsukwgTBQfuPVOiSeWtLbNTgSjtgYtICvCzYSmxwIXGeurxyOcGlrjvcDaAIsDIBDziWipcZbBPVUlzwhnpvjPrVHghlOppHdRUxctaGRUcBQXUJutPBhNSzebikzpytuIADtOEswqcJxZsBvkwvDayDXrofHfpxOrYzTXLSvZTkXodWNimYNiTAlFywOcRFMFSaNYOQAsxsHiDFxnvwFHkwMivNjJqAalJaUqmUDHkrWnGWnPLEZogCTwQSbnTEZIIZEHoCdxWftJaddNbreSHUVlPhLTWSAcmdwkgCDASTRLGjClarTYPmTZppYyKJcCmQyKmmFFFvhFsSZevKWKCGcQVUmnbPKiIXGQWyUieQZEgBhqlJhbKkzmMoWZPzsioovcdmKBQNRRHKfBtnaROdYhrXaeA;
     if (token) {
       const decodedUser = await googleAuth(token as string);
-      const user = await User.findOne({
-        where: {
-          email: decodedUser?.email,
-        },
-      });
-      const lecture = await Lecture.findOne({
-        where: {
-          isHidden: false,
-          id: req.params.lectureId,
-        },
-      });
-      const section = await Section.findOne({
-        where: {
-          isHidden: false,
-          id: lecture?.sectionId,
-        },
-      });
-      const enrollments = await Enrollment.findAll({
-        where: {
-          courseId: section?.courseId,
-          learnerId: user?.id,
-        },
-      });
-      const video = await Video.findOne({
-        where: {
-          isHidden: false,
-          lectureId: req.params.lectureId,
-        },
-      });
-      if (enrollments.length) {
-        const extension = video?.fileName.split(".")[1];
-        const file = bucket.file(video!.id + "." + extension);
-        const config = {
-          action: "read" as const,
-          expires: moment(new Date()).add(1, "day").format("MM-DD-YYYY"),
-          accessibleAt: moment(new Date()).format("MM-DD-YYYY"),
-        };
 
-        file.getSignedUrl(config, (error, url) => {
-          if (error) {
-            res.status(500).json({
-              message: error.message,
+      const userSnapshot = await db
+        .collection("users")
+        .where("isHidden", "==", false)
+        .where("email", "==", decodedUser?.email)
+        .get();
+      if (userSnapshot.docs.length) {
+        const user = userSnapshot.docs[0].data();
+        const lectureSnapshot = await db
+          .collection("lectures")
+          .where("isHidden", "==", false)
+          .where("id", "==", lectureId)
+          .get();
+        if (lectureSnapshot.docs.length) {
+          const lecture = lectureSnapshot.docs[0].data();
+          const sectionSnapshot = await db
+            .collection("sections")
+            .where("isHidden", "==", false)
+            .where("id", "==", lecture.sectionId)
+            .get();
+          if (sectionSnapshot.docs.length) {
+            const section = sectionSnapshot.docs[0].data();
+            const enrollmentsSnapshot = await db
+              .collection("enrollments")
+              .where("isHidden", "==", false)
+              .where("courseId", "==", section?.courseId)
+              .where("learnerId", "==", user?.id)
+              .get();
+            if (enrollmentsSnapshot.docs.length) {
+              const enrollments = enrollmentsSnapshot.docs[0].data();
+              const videoSnapshot = await db
+                .collection("videos")
+                .where("isHidden", "==", false)
+                .where("lectureId", "==", lectureId)
+                .get();
+              if (videoSnapshot.docs.length) {
+                const video = videoSnapshot.docs[0].data();
+                if (enrollments.length) {
+                  const extension = video?.fileName.split(".")[1];
+                  const file = bucket.file(video!.id + "." + extension);
+                  const config = {
+                    action: "read" as const,
+                    expires: moment(new Date())
+                      .add(1, "day")
+                      .format("MM-DD-YYYY"),
+                    accessibleAt: moment(new Date()).format("MM-DD-YYYY"),
+                  };
+
+                  file.getSignedUrl(config, (error, url) => {
+                    if (error) {
+                      res.status(500).json({
+                        message: error.message,
+                        signedUrl: null,
+                      });
+                    } else {
+                      res.status(200).json({
+                        message: "Get signed url successfully",
+                        signedUrl: url,
+                      });
+                    }
+                  });
+                }
+                // Learner not purchase
+                else {
+                  res.status(401).json({
+                    message: log("Permission denied"),
+                  });
+                }
+              } else {
+                res.status(200).json({
+                  message: "Video not found",
+                  signedUrl: null,
+                });
+              }
+            } else {
+              res.status(404).json({
+                message: "Enrollment not found",
+                signedUrl: null,
+              });
+            }
+          } else {
+            res.status(404).json({
+              message: "Section not found",
               signedUrl: null,
             });
-          } else {
-            res.status(200).json({
-              message: "Get signed url successfully",
-              signedUrl: url,
-            });
           }
-        });
-      }
-      // Learner not purchase
-      else {
-        res.status(401).json({
-          message: log("Permission denied"),
+        } else {
+          res.status(404).json({
+            message: "Lecture not found",
+            signedUrl: null,
+          });
+        }
+      } else {
+        res.status(404).json({
+          message: "User not found",
+          signedUrl: null,
         });
       }
     } // If client does not send token
@@ -409,16 +513,22 @@ router.get("/:lectureId/video/streaming", async (req, res, next) => {
 router.put("/:lectureId/video/length", requireAuth, async (req, res, next) => {
   requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
     try {
-      const videoModel = await Video.findOne({
-        where: {
-          isHidden: false,
-          lectureId: req.params.lectureId,
-        },
-      });
-      if (videoModel) {
+      const lectureId = req.params.lectureId;
+      const snapshot = await db
+        .collection("videos")
+        .where("isHidden", "==", false)
+        .where("lectureId", "==", lectureId)
+        .get();
+
+      if (snapshot.docs.length) {
+        const videoModel = snapshot.docs[0].data();
+        const updatedAt = momentFormat();
+        await db.collection("videos").doc(videoModel.id).update({
+          length: req.body.length,
+          updatedAt: updatedAt,
+        });
         videoModel.length = req.body.length;
-        await videoModel.save();
-        await videoModel.reload();
+        videoModel.updatedAt = updatedAt;
         res.status(200).json({
           message: log("Video update successfully"),
           count: 1,
@@ -437,16 +547,16 @@ router.put("/:lectureId/video/length", requireAuth, async (req, res, next) => {
   });
 });
 
-// GET method: get video model
+// GET method: get video model by lecture id
 router.get("/:lectureId/video", async (req, res, next) => {
   try {
-    const videoModel = await Video.findOne({
-      where: {
-        isHidden: false,
-        lectureId: req.params.lectureId,
-      },
-    });
-    if (videoModel) {
+    const snapshot = await db
+      .collection("videos")
+      .where("isHidden", "==", false)
+      .where("lectureId", "==", req.params.lectureId)
+      .get();
+    if (snapshot.docs.length) {
+      const videoModel = snapshot.docs[0].data();
       res.status(200).json({
         message: log("Get video model successfully"),
         count: 1,
@@ -471,73 +581,108 @@ router.get("/:lectureId/video", async (req, res, next) => {
 // PUT method: move a lecture down
 router.put("/:lectureId/down", requireAuth, async (req, res, next) => {
   requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
+    const updatedAt = momentFormat();
     const sectionId = req.body.sectionId;
-    const lecture = await Lecture.findOne({
-      where: {
-        isHidden: false,
-        id: req.params.lectureId,
-      },
-    });
-    if (lecture) {
-      const lectures = await Lecture.findAll({
-        where: {
-          isHidden: false,
-          sectionId: sectionId,
-        },
-      });
-      lectures.sort((a, b) => a.lectureOrder - b.lectureOrder);
-      if (lecture.sectionId === sectionId) {
-        if (lectures.length) {
-          const index = lectures.findIndex((e) => e.id === lecture.id);
-          const tempOrder = lecture.lectureOrder;
-          lecture.lectureOrder = lectures[index + 1].lectureOrder;
-          lectures[index + 1].lectureOrder = tempOrder;
-          await lectures[index + 1].save();
-          await lectures[index + 1].reload();
-          await lecture.save();
-          await lecture.reload();
+    const snapshot = await db
+      .collection("lectures")
+      .where("isHidden", "==", false)
+      .where("id", "==", req.params.lectureId)
+      .get();
+    if (snapshot.docs.length) {
+      const lecture = snapshot.docs[0].data();
+      const lecturesSnapshot = await db
+        .collection("lectures")
+        .where("isHidden", "==", false)
+        .where("sectionId", "==", sectionId)
+        .get();
+      if (lecturesSnapshot.docs.length) {
+        const lectures = lecturesSnapshot.docs.map((lecture) => lecture.data());
+        lectures.sort((a, b) => a.lectureOrder - b.lectureOrder);
+
+        if (lecture.sectionId === sectionId) {
+          if (
+            lectures.findIndex((l) => l.id === lecture.id) ===
+            lectures.length - 1
+          ) {
+            res.status(400).json({
+              message: "This lecture is already on bottom, cannot move down",
+            });
+          } else {
+            if (lectures.length) {
+              const index = lectures.findIndex((e) => e.id === lecture.id);
+              const tempOrder = lecture.lectureOrder;
+              await db
+                .collection("lectures")
+                .doc(lecture.id)
+                .update({
+                  lectureOrder: lectures[index + 1].lectureOrder,
+                  updatedAt: updatedAt,
+                });
+              await db
+                .collection("lectures")
+                .doc(lectures[index + 1].id)
+                .update({
+                  lectureOrder: tempOrder,
+                  updatedAt: updatedAt,
+                });
+              res.status(200).json({
+                message: log("Move lecture down successfully"),
+              });
+            } else {
+              res.status(404).json({
+                message: log("No lecture found"),
+              });
+            }
+          }
+        } else {
+          await db.collection("lectures").doc(lecture.id).update({
+            sectionId: sectionId,
+            updatedAt: updatedAt,
+          });
+          for (let i = 0; i < lectures.length; i++) {
+            if (i === 0) {
+              if (lecture.lectureOrder > lectures[i].lectureOrder) {
+                const tempOrder = lectures[i].lectureOrder;
+                await db.collection("lectures").doc(lectures[i].id).update({
+                  lectureOrder: lecture.lectureOrder,
+                  updatedAt: updatedAt,
+                });
+                await db.collection("lectures").doc(lecture.id).update({
+                  lectureOrder: tempOrder,
+                  updatedAt: updatedAt,
+                });
+              } else {
+                break;
+              }
+            } else {
+              if (lectures[i].lectureOrder < lectures[i - 1].lectureOrder) {
+                const tempOrder = lectures[i].lectureOrder;
+                await db
+                  .collection("lectures")
+                  .doc(lectures[i].id)
+                  .update({
+                    lectureOrder: lectures[i - 1].lectureOrder,
+                    updatedAt: updatedAt,
+                  });
+                await db
+                  .collection("lectures")
+                  .doc(lectures[i - 1].id)
+                  .update({
+                    lectureOrder: tempOrder,
+                    updatedAt: updatedAt,
+                  });
+              } else {
+                break;
+              }
+            }
+          }
           res.status(200).json({
             message: log("Move lecture down successfully"),
           });
-        } else {
-          res.status(404).json({
-            message: log("No lecture found"),
-          });
         }
       } else {
-        lecture.sectionId = sectionId;
-        await lecture.save();
-        await lecture.reload();
-
-        for (let i = 0; i < lectures.length; i++) {
-          if (i === 0) {
-            if (lecture.lectureOrder > lectures[i].lectureOrder) {
-              const tempOrder = lectures[i].lectureOrder;
-              lectures[i].lectureOrder = lecture.lectureOrder;
-              lecture.lectureOrder = tempOrder;
-              await lectures[i].save();
-              await lectures[i].reload();
-              await lecture.save();
-              await lecture.reload();
-            } else {
-              break;
-            }
-          } else {
-            if (lectures[i].lectureOrder < lectures[i - 1].lectureOrder) {
-              const tempOrder = lectures[i].lectureOrder;
-              lectures[i].lectureOrder = lectures[i - 1].lectureOrder;
-              lectures[i - 1].lectureOrder = tempOrder;
-              await lectures[i].save();
-              await lectures[i].reload();
-              await lectures[i - 1].save();
-              await lectures[i - 1].reload();
-            } else {
-              break;
-            }
-          }
-        }
-        res.status(200).json({
-          message: log("Move lecture down successfully"),
+        res.status(404).json({
+          message: "No lecture found",
         });
       }
     } else {
@@ -551,66 +696,93 @@ router.put("/:lectureId/down", requireAuth, async (req, res, next) => {
 // PUT method: move a lecture up
 router.put("/:lectureId/up", requireAuth, async (req, res, next) => {
   requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
+    const updatedAt = momentFormat();
     const sectionId = req.body.sectionId;
-    const lecture = await Lecture.findOne({
-      where: {
-        isHidden: false,
-        id: req.params.lectureId,
-      },
-    });
-    if (lecture) {
-      const lectures = await Lecture.findAll({
-        where: {
-          isHidden: false,
-          sectionId: sectionId,
-        },
-      });
+    const snapshot = await db
+      .collection("lectures")
+      .where("isHidden", "==", false)
+      .where("id", "==", req.params.lectureId)
+      .get();
+    if (snapshot.docs.length) {
+      const lecture = snapshot.docs[0].data();
+      const lecturesSnapshot = await db
+        .collection("lectures")
+        .where("isHidden", "==", false)
+        .where("sectionId", "==", sectionId)
+        .get();
+      const lectures = lecturesSnapshot.docs.map((lecture) => lecture.data());
       lectures.sort((a, b) => a.lectureOrder - b.lectureOrder);
       if (lecture.sectionId === sectionId) {
-        if (lectures.length) {
-          const index = lectures.findIndex((e) => e.id === lecture.id);
-          const tempOrder = lecture.lectureOrder;
-          lecture.lectureOrder = lectures[index - 1].lectureOrder;
-          lectures[index - 1].lectureOrder = tempOrder;
-          await lectures[index - 1].save();
-          await lectures[index - 1].reload();
-          await lecture.save();
-          await lecture.reload();
-          res.status(200).json({
-            message: log("Move lecture up successfully"),
+        if (lectures.findIndex((l) => l.id === lecture.id) === 0) {
+          res.status(400).json({
+            message: "This lecture is already on top, cannot move up",
           });
         } else {
-          res.status(404).json({
-            message: log("No lecture found"),
-          });
+          if (lectures.length) {
+            const index = lectures.findIndex((e) => e.id === lecture.id);
+            const tempOrder = lecture.lectureOrder;
+            await db
+              .collection("lectures")
+              .doc(lecture.id)
+              .update({
+                lectureOrder: lectures[index - 1].lectureOrder,
+                updatedAt: updatedAt,
+              });
+            await db
+              .collection("lectures")
+              .doc(lectures[index - 1].id)
+              .update({
+                lectureOrder: tempOrder,
+                updatedAt: updatedAt,
+              });
+            res.status(200).json({
+              message: log("Move lecture up successfully"),
+            });
+          } else {
+            res.status(404).json({
+              message: log("No lecture found"),
+            });
+          }
         }
       } else {
-        lecture.sectionId = sectionId;
-        await lecture.save();
-        await lecture.reload();
+        await db.collection("lectures").doc(lecture.id).update({
+          sectionId: sectionId,
+          updatedAt: updatedAt,
+        });
 
         for (let i = lectures.length - 1; i >= 0; i--) {
           if (i === lectures.length - 1) {
             if (lecture.lectureOrder < lectures[i].lectureOrder) {
               const tempOrder = lectures[i].lectureOrder;
-              lectures[i].lectureOrder = lecture.lectureOrder;
-              lecture.lectureOrder = tempOrder;
-              await lectures[i].save();
-              await lectures[i].reload();
-              await lecture.save();
-              await lecture.reload();
+              await db.collection("lectures").doc(lecture[i].id).update({
+                lectureOrder: lecture.lectureOrder,
+                updatedAt: updatedAt,
+              });
+              await db.collection("lectures").doc(lecture.id).update({
+                lectureOrder: tempOrder,
+                updatedAt: updatedAt,
+              });
             } else {
               break;
             }
           } else {
             if (lectures[i].lectureOrder > lectures[i + 1].lectureOrder) {
               const tempOrder = lectures[i].lectureOrder;
-              lectures[i].lectureOrder = lectures[i + 1].lectureOrder;
+              await db
+                .collection("lectures")
+                .doc(lecture[i].id)
+                .update({
+                  lectureOrder: lectures[i + 1].lectureOrder,
+                  updatedAt: updatedAt,
+                });
+              await db
+                .collection("lectures")
+                .doc(lecture[i + 1].id)
+                .update({
+                  lectureOrder: tempOrder,
+                  updatedAt: updatedAt,
+                });
               lectures[i + 1].lectureOrder = tempOrder;
-              await lectures[i].save();
-              await lectures[i].reload();
-              await lectures[i + 1].save();
-              await lectures[i + 1].reload();
             } else {
               break;
             }

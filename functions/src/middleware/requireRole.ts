@@ -1,7 +1,7 @@
 import { ROLES } from "../types";
-import User from "../models/user";
 import { Request, Response, NextFunction } from "express";
 import { log } from "../utils";
+import db from "../database/firestoreConnection";
 
 const requireRole = async (
   routeRoles: ROLES[],
@@ -11,10 +11,14 @@ const requireRole = async (
   cb: (req: Request, res: Response, next: NextFunction) => void
 ) => {
   try {
-    const user = await User.findOne({
-      where: { email: req.body.decodedUser.email },
-    });
-    if (user) {
+    const snapshot = await db
+      .collection("users")
+      .where("isHidden", "==", false)
+      .where("email", "==", req.body.decodedUser.email)
+      .get();
+
+    if (snapshot.docs[0]) {
+      const user = snapshot.docs[0].data();
       if (!routeRoles.includes(user.userRole)) {
         console.log("Permission denied");
         return res.status(401).json({

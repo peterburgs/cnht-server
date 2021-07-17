@@ -1,17 +1,13 @@
 import express, { Router, Request, Response, NextFunction } from "express";
 import { log } from "../utils";
-import { Lecture, ROLES, Video } from "../types";
-import { Op, Model } from "sequelize";
+import { Lecture, ROLES, Course, Section, Video } from "../types";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
-import CourseModel from "../models/course";
-import SectionModel from "../models/section";
-import LectureModel from "../models/lecture";
-import VideoModel from "../models/video";
 import { v4 as uuidv4 } from "uuid";
 import { Storage } from "@google-cloud/storage";
 import path from "path";
-
+import db from "../database/firestoreConnection";
+import moment from "moment";
 // Define router
 const router: Router = express.Router();
 
@@ -29,6 +25,7 @@ router.post(
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
+      const courseId = req.params.courseId;
       const fileId = req.headers["x-content-id"];
       const chunkSize = Number(req.headers["x-chunk-length"]);
       const chunkId = Number(req.headers["x-chunk-id"]);
@@ -39,7 +36,6 @@ router.post(
         fileStorage[fileId as string] || []);
       const chunk: Buffer[] = [];
       try {
-        console.log(chunkSize);
         chunk.push(req.body);
         const completeChunk = Buffer.concat(chunk);
         if (completeChunk.length !== chunkSize) {
@@ -47,14 +43,9 @@ router.post(
             message: "Bad request",
           });
         }
-
         file[chunkId] = completeChunk;
-        console.log(file);
-        console.log(chunksQuantity);
         const fileCompleted =
           file.filter((chunk) => chunk).length === chunksQuantity;
-        console.log(fileCompleted);
-
         if (fileCompleted) {
           const completeFile = Buffer.concat(file);
           if (completeFile.length !== fileSize) {
@@ -70,18 +61,22 @@ router.post(
           const fileInBucket = bucket.file(_id + "." + extension);
           await fileInBucket.save(completeFile);
 
-          const course = await CourseModel.findOne({
-            where: {
-              isHidden: false,
-              id: req.params.courseId,
-            },
-          });
+          const snapshot = await db
+            .collection("courses")
+            .where("isHidden", "==", false)
+            .where("id", "==", courseId)
+            .get();
+          const course = snapshot.docs[0].data();
           if (course) {
-            course.thumbnailUrl = `/api/courses/thumbnail/${_id}.${extension}`;
-            await course.save();
+            const updatedCourse = await db
+              .collection("courses")
+              .doc(courseId)
+              .update({
+                thumbnailUrl: `/api/courses/thumbnail/${_id}.${extension}`,
+              });
             return res.status(201).json({
               message: "Thumbnail uploaded",
-              course: course,
+              course: updatedCourse,
             });
           } else {
             return res.status(404).json({ message: "Cannot find course" });
@@ -106,19 +101,45 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        const course = await CourseModel.create({
+        const createdAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
+        const updatedAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
+        const courseId = uuidv4();
+        const course = await db.collection("courses").doc(courseId).set({
+          id: courseId,
           title: req.body.title,
           courseDescription: req.body.courseDescription,
           price: req.body.price,
           courseType: req.body.courseType,
           grade: req.body.grade,
+          isPublished: req.body.isPublished,
+          learnerCount: 0,
+          lectureCount: 0,
+          sectionCount: 0,
+          thumbnailUrl: "",
+          isHidden: false,
+          createdAt: createdAt,
+          updatedAt: updatedAt,
         });
         if (course) {
-          await course.reload();
           res.status(201).json({
             message: log("Create new course successfully"),
             count: 1,
-            course: course,
+            course: {
+              id: courseId,
+              title: req.body.title,
+              courseDescription: req.body.courseDescription,
+              price: req.body.price,
+              courseType: req.body.courseType,
+              grade: req.body.grade,
+              isPublished: req.body.isPublished,
+              learnerCount: 0,
+              lectureCount: 0,
+              sectionCount: 0,
+              thumbnailUrl: "",
+              isHidden: false,
+              createdAt: createdAt,
+              updatedAt: updatedAt,
+            },
           });
         } else {
           res.status(500).json({
@@ -142,19 +163,32 @@ router.post(
 // GET method: get courses by filters
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Create filter from request query
-    let reqParams: { [key: string]: string }[] = [];
-    for (let [key, value] of Object.entries(req.query)) {
-      reqParams.push({ [key]: String(value) });
-    }
+    const snapshot = await db
+      .collection("courses")
+      .where("isHidden", "==", false)
+      .get();
+    let courses = snapshot.docs.map((doc) => doc.data());
+    const courseId = req.query.courseId;
+    const courseTitle = req.query.courseTitle;
+    const courseType = req.query.courseType;
+    const courseGrade = req.query.courseGrade;
+    const isPublished = req.query.isPublished;
 
-    // Find course from filter
-    const courses = await CourseModel.findAll({
-      where: {
-        isHidden: false,
-        [Op.and]: reqParams,
-      },
-    });
+    if (courseId) {
+      courses.filter((course) => course.id === courseId);
+    }
+    if (courseTitle) {
+      courses.filter((course) => course.title.includes(courseTitle));
+    }
+    if (courseType) {
+      courses.filter((course) => course.courseType == courseType);
+    }
+    if (courseGrade) {
+      courses.filter((course) => course.grade == courseGrade);
+    }
+    if (isPublished) {
+      courses.filter((course) => course.isPublished == isPublished);
+    }
     if (courses.length) {
       res.status(200).json({
         message: log("Courses found"),
@@ -185,19 +219,30 @@ router.put(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        // Find course by id
-        let course = await CourseModel.findByPk(req.params.id);
-        if (course) {
-          // Update
+        const courseId = req.params.id;
+        let snapshot = await db
+          .collection("courses")
+          .where("id", "==", courseId)
+          .get();
+        if (snapshot.docs.length) {
+          const updatedAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
+          await db.collection("courses").doc(courseId).update({
+            title: req.body.title,
+            courseDescription: req.body.courseDescription,
+            price: req.body.price,
+            courseType: req.body.courseType,
+            grade: req.body.grade,
+            isPublished: req.body.isPublished,
+            updatedAt: updatedAt,
+          });
+          let course = snapshot.docs[0].data();
+          course.updatedAt = updatedAt;
           course.title = req.body.title;
           course.courseDescription = req.body.courseDescription;
           course.price = req.body.price;
           course.courseType = req.body.courseType;
           course.grade = req.body.grade;
-          // Save
-          await course.save();
-          // Refresh from database
-          await course.reload();
+          course.isPublished = req.body.isPublished;
           res.status(200).json({
             message: log("Update course successfully"),
             count: 1,
@@ -229,15 +274,19 @@ router.delete(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
+        const courseId = req.params.id;
         // Find course by id
-        let course = await CourseModel.findByPk(req.params.id);
+        let course = await db.collection("courses").where("id", "==", courseId);
         if (course) {
-          // Mark as hidden
-          course.isHidden = true;
-          // Save
-          await course.save();
-          // Refresh from database
-          await course.reload();
+          const updatedAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
+
+          const deletedCourse = await db
+            .collection("courses")
+            .doc(courseId)
+            .update({
+              isHidden: true,
+              updatedAt: updatedAt,
+            });
           res.status(200).json({
             message: log("Delete course successfully"),
           });
@@ -256,7 +305,7 @@ router.delete(
   }
 );
 
-// GET method: get thumbnail of a course
+// GET method: get the thumbnail of a course
 router.get("/thumbnail/:key", async (req, res, next) => {
   try {
     const file = bucket.file(req.params.key);
@@ -272,24 +321,26 @@ router.get("/thumbnail/:key", async (req, res, next) => {
 // GET method: get all lectures of a course by courseId
 router.get("/:courseId/lectures", async (req, res, next) => {
   try {
-    const sections = await SectionModel.findAll({
-      where: {
-        isHidden: false,
-        courseId: req.params.courseId,
-      },
-    });
-    console.log(sections);
+    const courseId = req.params.courseId;
+    const sectionSnapShot = await db
+      .collection("sections")
+      .where("isHidden", "==", false)
+      .where("courseId", "==", courseId)
+      .get();
+    const sections = sectionSnapShot.docs
+      .map((section) => section.data())
+      .filter((section) => section.courseId === courseId);
+
     if (sections.length) {
       let lectures: Lecture[] = [];
       for (let s of sections) {
-        const ls = await LectureModel.findAll({
-          where: {
-            isHidden: false,
-            sectionId: s.id,
-          },
-        });
-        lectures = lectures.concat(ls);
-        console.log(ls);
+        const l = await db
+          .collection("lectures")
+          .where("isHidden", "==", false)
+          .where("sectionId", "==", s.id)
+          .get();
+        const lecture = l.docs[0].data() as Lecture;
+        lectures = lectures.concat(lecture);
       }
       if (lectures.length) {
         res.status(200).json({
@@ -323,29 +374,32 @@ router.get("/:courseId/lectures", async (req, res, next) => {
 
 // GET method: estimate course pricing
 router.get("/:courseId/pricing", async (req, res, next) => {
-  const course = await CourseModel.findOne({
-    where: {
-      isHidden: false,
-      id: req.params.courseId,
-    },
-  });
+  const courseId = req.params.courseId;
+  const courseSnapshot = await db
+    .collection("courses")
+    .where("isHidden", "==", false)
+    .where("id", "==", courseId)
+    .get();
+  const course = courseSnapshot.docs[0].data();
   if (course) {
-    const sections = await SectionModel.findAll({
-      where: {
-        isHidden: false,
-        courseId: course.id,
-      },
-    });
+    const sectionSnapShot = await db
+      .collection("sections")
+      .where("isHidden", "==", false)
+      .where("courseId", "==", courseId)
+      .get();
+    const sections = sectionSnapShot.docs.map((section) => section.data());
     if (sections.length) {
       let _lectures: Lecture[] = [];
       for (let i = 0; i < sections.length; i++) {
         const section = sections[i];
-        const lectures = await LectureModel.findAll({
-          where: {
-            isHidden: false,
-            sectionId: section.id,
-          },
-        });
+        const lectureSnapShot = await db
+          .collection("lectures")
+          .where("isHidden", "==", false)
+          .where("sectionId", "==", section.id)
+          .get();
+        const lectures = lectureSnapShot.docs.map((lecture) =>
+          lecture.data()
+        ) as Lecture[];
         if (lectures.length) {
           _lectures = _lectures.concat(lectures);
         }
@@ -353,12 +407,14 @@ router.get("/:courseId/pricing", async (req, res, next) => {
       let _videos: Video[] = [];
       for (let j = 0; j < _lectures.length; j++) {
         const lecture = _lectures[j];
-        const videos = await VideoModel.findAll({
-          where: {
-            isHidden: false,
-            lectureId: lecture.id,
-          },
-        });
+        const videoSnapShot = await db
+          .collection("videos")
+          .where("isHidden", "==", false)
+          .where("lectureId", "==", lecture.id)
+          .get();
+        const videos = videoSnapShot.docs.map((video) =>
+          video.data()
+        ) as Video[];
         _videos = _videos.concat(videos);
         if (_videos.length == 0) {
           return res.status(404).json({
@@ -389,18 +445,33 @@ router.get("/:courseId/pricing", async (req, res, next) => {
 
 // GET method: get all sections
 router.get("/:courseId/sections", async (req, res, next) => {
-  const sections = await SectionModel.findAll({
-    where: {
-      isHidden: false,
-      courseId: req.params.courseId,
-    },
-  });
-  if (sections.length) {
-    sections.sort((a, b) => a.sectionOrder - b.sectionOrder);
-    res.status(200).json({
-      message: log("Get sections successfully"),
-      count: sections.length,
-      sections: sections,
+  try {
+    const courseId = req.params.courseId;
+    const sectionSnapShot = await db
+      .collection("sections")
+      .where("courseId", "==", courseId)
+      .where("isHidden", "==", false)
+      .get();
+    if (sectionSnapShot.docs.length) {
+      const sections = sectionSnapShot.docs.map((section) => section.data());
+      sections.sort((a, b) => a.sectionOrder - b.sectionOrder);
+      res.status(200).json({
+        message: log("Get sections successfully"),
+        count: sections.length,
+        sections: sections,
+      });
+    } else {
+      res.status(404).json({
+        message: log("No sections found"),
+        count: 0,
+        sections: [],
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      message: log(error.message),
+      count: 0,
+      sections: [],
     });
   }
 });
