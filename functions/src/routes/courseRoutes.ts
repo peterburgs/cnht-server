@@ -1,5 +1,5 @@
 import express, { Router, Request, Response, NextFunction } from "express";
-import { log } from "../utils";
+import { log, momentFormat } from "../utils";
 import { Lecture, ROLES, Course, Section, Video } from "../types";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
@@ -101,8 +101,8 @@ router.post(
   async (req: Request, res: Response, next: NextFunction) => {
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
-        const createdAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
-        const updatedAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
+        const createdAt = momentFormat();
+        const updatedAt = momentFormat();
         const courseId = uuidv4();
         const course = await db.collection("courses").doc(courseId).set({
           id: courseId,
@@ -167,39 +167,46 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
       .collection("courses")
       .where("isHidden", "==", false)
       .get();
-    let courses = snapshot.docs.map((doc) => doc.data());
-    const courseId = req.query.courseId;
-    const courseTitle = req.query.courseTitle;
-    const courseType = req.query.courseType;
-    const courseGrade = req.query.courseGrade;
-    const isPublished = req.query.isPublished;
-
-    if (courseId) {
-      courses.filter((course) => course.id === courseId);
-    }
-    if (courseTitle) {
-      courses.filter((course) => course.title.includes(courseTitle));
-    }
-    if (courseType) {
-      courses.filter((course) => course.courseType == courseType);
-    }
-    if (courseGrade) {
-      courses.filter((course) => course.grade == courseGrade);
-    }
-    if (isPublished) {
-      courses.filter((course) => course.isPublished == isPublished);
-    }
-    if (courses.length) {
-      res.status(200).json({
-        message: log("Courses found"),
-        count: courses.length,
-        courses: courses,
-      });
+    if (snapshot.docs.length) {
+      let courses = snapshot.docs.map((doc) => doc.data());
+      const courseId = req.query.id;
+      const courseTitle = req.query.title;
+      const courseType = req.query.courseType;
+      const courseGrade = req.query.grade;
+      const isPublished = req.query.isPublished;
+      if (courseId) {
+        courses = courses.filter((course) => course.id === courseId);
+      }
+      if (courseTitle) {
+        courses = courses.filter((course) =>
+          course.title.includes(courseTitle)
+        );
+      }
+      if (courseType) {
+        courses = courses.filter((course) => course.courseType == courseType);
+      }
+      if (courseGrade) {
+        courses = courses.filter((course) => course.grade == courseGrade);
+      }
+      if (isPublished) {
+        courses = courses.filter((course) => course.isPublished == isPublished);
+      }
+      if (courses.length) {
+        res.status(200).json({
+          message: log("Courses found"),
+          count: courses.length,
+          courses: courses,
+        });
+      } else {
+        res.status(404).json({
+          message: log("No courses found"),
+          count: 0,
+          courses: [],
+        });
+      }
     } else {
       res.status(404).json({
-        message: log("No courses found"),
-        count: 0,
-        courses: [],
+        message: "Cannot find course",
       });
     }
   } catch (error) {
@@ -327,39 +334,51 @@ router.get("/:courseId/lectures", async (req, res, next) => {
       .where("isHidden", "==", false)
       .where("courseId", "==", courseId)
       .get();
-    const sections = sectionSnapShot.docs
-      .map((section) => section.data())
-      .filter((section) => section.courseId === courseId);
-
-    if (sections.length) {
-      let lectures: Lecture[] = [];
-      for (let s of sections) {
-        const l = await db
-          .collection("lectures")
-          .where("isHidden", "==", false)
-          .where("sectionId", "==", s.id)
-          .get();
-        const lecture = l.docs[0].data() as Lecture;
-        lectures = lectures.concat(lecture);
-      }
-      if (lectures.length) {
-        res.status(200).json({
-          message: "All lectures found",
-          count: lectures.length,
-          lectures: lectures,
-        });
+    if (sectionSnapShot.docs.length) {
+      const sections = sectionSnapShot.docs
+        .map((section) => section.data())
+        .filter((section) => section.courseId === courseId);
+      if (sections.length) {
+        let lectures: Lecture[] = [];
+        for (let s of sections) {
+          const l = await db
+            .collection("lectures")
+            .where("isHidden", "==", false)
+            .where("sectionId", "==", s.id)
+            .get();
+          if (l.docs.length) {
+            lectures = lectures.concat(
+              l.docs.map((singleLecture) => singleLecture.data() as Lecture)
+            );
+          } else {
+            res.status(404).json({
+              message: "Cannot find section",
+            });
+          }
+        }
+        if (lectures.length) {
+          res.status(200).json({
+            message: "All lectures found",
+            count: lectures.length,
+            lectures: lectures,
+          });
+        } else {
+          res.status(404).json({
+            message: "No lectures found",
+            count: 0,
+            lectures: [],
+          });
+        }
       } else {
         res.status(404).json({
-          message: "No lectures found",
+          message: "Cannot find sections",
           count: 0,
           lectures: [],
         });
       }
     } else {
       res.status(404).json({
-        message: "Cannot find sections",
-        count: 0,
-        lectures: [],
+        message: "Cannot find section",
       });
     }
   } catch (error) {
@@ -380,54 +399,59 @@ router.get("/:courseId/pricing", async (req, res, next) => {
     .where("isHidden", "==", false)
     .where("id", "==", courseId)
     .get();
-  const course = courseSnapshot.docs[0].data();
-  if (course) {
+  if (courseSnapshot.docs.length) {
     const sectionSnapShot = await db
       .collection("sections")
       .where("isHidden", "==", false)
       .where("courseId", "==", courseId)
       .get();
-    const sections = sectionSnapShot.docs.map((section) => section.data());
-    if (sections.length) {
+    if (sectionSnapShot.docs.length) {
+      const sections = sectionSnapShot.docs.map((section) => section.data());
       let _lectures: Lecture[] = [];
       for (let i = 0; i < sections.length; i++) {
-        const section = sections[i];
         const lectureSnapShot = await db
           .collection("lectures")
           .where("isHidden", "==", false)
-          .where("sectionId", "==", section.id)
+          .where("sectionId", "==", sections[i].id)
           .get();
-        const lectures = lectureSnapShot.docs.map((lecture) =>
-          lecture.data()
-        ) as Lecture[];
-        if (lectures.length) {
-          _lectures = _lectures.concat(lectures);
-        }
-      }
-      let _videos: Video[] = [];
-      for (let j = 0; j < _lectures.length; j++) {
-        const lecture = _lectures[j];
-        const videoSnapShot = await db
-          .collection("videos")
-          .where("isHidden", "==", false)
-          .where("lectureId", "==", lecture.id)
-          .get();
-        const videos = videoSnapShot.docs.map((video) =>
-          video.data()
-        ) as Video[];
-        _videos = _videos.concat(videos);
-        if (_videos.length == 0) {
-          return res.status(404).json({
-            message: log("No lectures found"),
-            price: 0,
+        if (lectureSnapShot.docs.length) {
+          _lectures = _lectures.concat(
+            lectureSnapShot.docs.map((l) => l.data() as Lecture)
+          );
+          let _videos: Video[] = [];
+          for (let j = 0; j < _lectures.length; j++) {
+            const videoSnapShot = await db
+              .collection("videos")
+              .where("isHidden", "==", false)
+              .where("lectureId", "==", _lectures[i].id)
+              .get();
+            if (videoSnapShot.docs.length) {
+              _videos = _videos.concat(
+                videoSnapShot.docs.map((video) => video.data() as Video)
+              );
+              if (_videos.length == 0) {
+                return res.status(404).json({
+                  message: log("No lectures found"),
+                  price: 0,
+                });
+              }
+              const totalBytes = _videos.reduce((e, i) => e + i.size, 0);
+              const scala = 23500 / (1024 * 1024 * 1024);
+              res.status(200).json({
+                message: log("Get estimated pricing successfully"),
+                price: Math.floor(totalBytes * 2 * scala),
+              });
+            } else {
+              res.status(404).json({
+                message: "Cannot find video",
+              });
+            }
+          }
+        } else {
+          res.status(404).json({
+            message: "Cannot find lectures",
           });
         }
-        const totalBytes = _videos.reduce((e, i) => e + i.size, 0);
-        const scala = 23500 / (1024 * 1024 * 1024);
-        res.status(200).json({
-          message: log("Get estimated pricing successfully"),
-          price: Math.floor(totalBytes * 2 * scala),
-        });
       }
     } else {
       res.status(404).json({
@@ -443,7 +467,7 @@ router.get("/:courseId/pricing", async (req, res, next) => {
   }
 });
 
-// GET method: get all sections
+// GET method: get all sections by course id
 router.get("/:courseId/sections", async (req, res, next) => {
   try {
     const courseId = req.params.courseId;

@@ -88,18 +88,18 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
       .collection("sections")
       .where("isHidden", "==", false)
       .get();
-    const sections = sectionSnapShot.docs.map((section) => section.data());
-    const sectionId = req.query.sectionId;
+    let sections = sectionSnapShot.docs.map((section) => section.data());
+    const sectionId = req.query.id;
     const title = req.query.title;
     const courseId = req.query.courseId;
     if (sectionId) {
-      sections.filter((section) => section.id == sectionId);
+      sections = sections.filter((section) => section.id == sectionId);
     }
     if (title) {
-      sections.filter((section) => section.title == title);
+      sections = sections.filter((section) => section.title == title);
     }
     if (courseId) {
-      sections.filter((section) => section.courseId == courseId);
+      sections = sections.filter((section) => section.courseId == courseId);
     }
     if (sections.length) {
       res.status(200).json({
