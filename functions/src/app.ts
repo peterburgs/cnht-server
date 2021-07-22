@@ -15,6 +15,8 @@ import lectureRoutes from "./routes/lectureRoutes";
 import enrollmentRoutes from "./routes/enrollmentRoutes";
 import commentRoutes from "./routes/commentRoutes";
 import depositRequestRoutes from "./routes/depositRequestRoutes";
+// Prevent CORS errors
+app.use(cors());
 
 // Middleware
 app.use(express.json());
@@ -23,18 +25,14 @@ app.use(
   morgan("Method=:method |URL= :url |Status= :status | :response-time ms\n")
 );
 
-// Database
-
-// Prevent CORS errors
-
-app.use(cors());
 // Handle header
 app.use((req: Request, res: Response, next: NextFunction) => {
+  res.header("Access-Control-Allow-Origin", "https://cungnhauhoctoan.net");
   res.header(
     "Access-Control-Allow-Headers",
     "Origin, X-Requested-With, Content-Type, Accept, Authorization"
   );
-  res.header("Access-Control-Allow-Origin", "*");
+
   res.header("Access-Control-Allow-Credentials", "true");
   if (req.method === "OPTIONS") {
     res.header(
@@ -45,6 +43,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   }
   next();
 });
+
 // Define URL
 app.get(`/api`, (req: Request, res: Response) => {
   res.status(200).json({

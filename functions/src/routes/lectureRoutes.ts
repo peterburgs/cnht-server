@@ -242,7 +242,6 @@ const googleAuth = async (token: string) => {
 };
 
 // POST: upload video
-// TODO: test upload video
 router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
   requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
     try {
@@ -388,7 +387,6 @@ router.post("/:lectureId/video/upload", requireAuth, async (req, res, next) => {
 });
 
 // GET method: Get signed url to stream video
-// TODO: test streaming
 router.get("/:lectureId/video/streaming", async (req, res, next) => {
   try {
     const lectureId = req.params.lectureId;
@@ -434,7 +432,7 @@ router.get("/:lectureId/video/streaming", async (req, res, next) => {
                 .get();
               if (videoSnapshot.docs.length) {
                 const video = videoSnapshot.docs[0].data();
-                if (enrollments.length) {
+                if (enrollments) {
                   const extension = video?.fileName.split(".")[1];
                   const file = bucket.file(video!.id + "." + extension);
                   const config = {
@@ -444,7 +442,6 @@ router.get("/:lectureId/video/streaming", async (req, res, next) => {
                       .format("MM-DD-YYYY"),
                     accessibleAt: moment(new Date()).format("MM-DD-YYYY"),
                   };
-
                   file.getSignedUrl(config, (error, url) => {
                     if (error) {
                       res.status(500).json({
@@ -458,15 +455,49 @@ router.get("/:lectureId/video/streaming", async (req, res, next) => {
                       });
                     }
                   });
-                }
-                // Learner not purchase
-                else {
-                  res.status(401).json({
-                    message: log("Permission denied"),
+                } else {
+                  res.status(404).json({
+                    message: log("Enrollment not found"),
                   });
                 }
               } else {
-                res.status(200).json({
+                res.status(404).json({
+                  message: "Video not found",
+                  signedUrl: null,
+                });
+              }
+            } else if (user.userRole == "admin") {
+              const videoSnapshot = await db
+                .collection("videos")
+                .where("isHidden", "==", false)
+                .where("lectureId", "==", lectureId)
+                .get();
+              if (videoSnapshot.docs.length) {
+                const video = videoSnapshot.docs[0].data();
+                const extension = video?.fileName.split(".")[1];
+                const file = bucket.file(video!.id + "." + extension);
+                const config = {
+                  action: "read" as const,
+                  expires: moment(new Date())
+                    .add(1, "day")
+                    .format("MM-DD-YYYY"),
+                  accessibleAt: moment(new Date()).format("MM-DD-YYYY"),
+                };
+                file.getSignedUrl(config, (error, url) => {
+                  if (error) {
+                    res.status(500).json({
+                      message: error.message,
+                      signedUrl: null,
+                    });
+                  } else {
+                    res.status(200).json({
+                      message: "Get signed url successfully",
+                      signedUrl: url,
+                    });
+                  }
+                });
+              } else {
+                res.status(404).json({
                   message: "Video not found",
                   signedUrl: null,
                 });
@@ -495,8 +526,7 @@ router.get("/:lectureId/video/streaming", async (req, res, next) => {
           signedUrl: null,
         });
       }
-    } // If client does not send token
-    else {
+    } else {
       res.status(401).json({
         message: log("Permission denied"),
       });
@@ -523,11 +553,14 @@ router.put("/:lectureId/video/length", requireAuth, async (req, res, next) => {
       if (snapshot.docs.length) {
         const videoModel = snapshot.docs[0].data();
         const updatedAt = momentFormat();
-        await db.collection("videos").doc(videoModel.id).update({
-          length: req.body.length,
-          updatedAt: updatedAt,
-        });
-        videoModel.length = req.body.length;
+        await db
+          .collection("videos")
+          .doc(videoModel.id)
+          .update({
+            length: Math.round(req.body.length),
+            updatedAt: updatedAt,
+          });
+        videoModel.length = Math.round(req.body.length);
         videoModel.updatedAt = updatedAt;
         res.status(200).json({
           message: log("Video update successfully"),

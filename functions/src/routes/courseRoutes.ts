@@ -436,10 +436,10 @@ router.get("/:courseId/pricing", async (req, res, next) => {
                 });
               }
               const totalBytes = _videos.reduce((e, i) => e + i.size, 0);
-              const scala = 23500 / (1024 * 1024 * 1024);
+              const scala = (2 * 23500) / (1024 * 1024 * 1024);
               res.status(200).json({
                 message: log("Get estimated pricing successfully"),
-                price: Math.floor(totalBytes * 2 * scala),
+                price: Math.floor(totalBytes * scala),
               });
             } else {
               res.status(404).json({
