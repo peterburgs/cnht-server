@@ -66,17 +66,16 @@ router.post(
             .where("isHidden", "==", false)
             .where("id", "==", courseId)
             .get();
-          const course = snapshot.docs[0].data();
-          if (course) {
+          if (snapshot.docs.length) {
             const updatedCourse = await db
               .collection("courses")
               .doc(courseId)
               .update({
                 thumbnailUrl: `/api/courses/thumbnail/${_id}.${extension}`,
+                updatedAt: momentFormat(),
               });
             return res.status(201).json({
               message: "Thumbnail uploaded",
-              course: updatedCourse,
             });
           } else {
             return res.status(404).json({ message: "Cannot find course" });
@@ -171,7 +170,6 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
       let courses = snapshot.docs.map((doc) => doc.data());
       const courseId = req.query.id;
       const courseTitle = req.query.title;
-      const courseType = req.query.courseType;
       const courseGrade = req.query.grade;
       const isPublished = req.query.isPublished;
       if (courseId) {
@@ -181,9 +179,6 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
         courses = courses.filter((course) =>
           course.title.includes(courseTitle)
         );
-      }
-      if (courseType) {
-        courses = courses.filter((course) => course.courseType == courseType);
       }
       if (courseGrade) {
         courses = courses.filter((course) => course.grade == courseGrade);
@@ -282,11 +277,12 @@ router.delete(
     requireRole([ROLES.ADMIN], req, res, next, async (req, res, next) => {
       try {
         const courseId = req.params.id;
-        // Find course by id
-        let course = await db.collection("courses").where("id", "==", courseId);
-        if (course) {
+        let snapshot = await db
+          .collection("courses")
+          .where("id", "==", courseId)
+          .get();
+        if (snapshot.docs.length) {
           const updatedAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
-
           const deletedCourse = await db
             .collection("courses")
             .doc(courseId)
@@ -294,9 +290,15 @@ router.delete(
               isHidden: true,
               updatedAt: updatedAt,
             });
-          res.status(200).json({
-            message: log("Delete course successfully"),
-          });
+          if (deletedCourse) {
+            res.status(200).json({
+              message: log("Delete course successfully"),
+            });
+          } else {
+            res.status(500).json({
+              message: log("Cannot delete course"),
+            });
+          }
         } else {
           res.status(404).json({
             message: log("Course not found"),

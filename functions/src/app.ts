@@ -15,6 +15,7 @@ import lectureRoutes from "./routes/lectureRoutes";
 import enrollmentRoutes from "./routes/enrollmentRoutes";
 import commentRoutes from "./routes/commentRoutes";
 import depositRequestRoutes from "./routes/depositRequestRoutes";
+import topicRoutes from "./routes/topicRoutes";
 // Prevent CORS errors
 app.use(cors());
 
@@ -27,7 +28,7 @@ app.use(
 
 // Handle header
 app.use((req: Request, res: Response, next: NextFunction) => {
-  res.header("Access-Control-Allow-Origin", "https://cungnhauhoctoan.net");
+  res.header("Access-Control-Allow-Origin", "*");
   res.header(
     "Access-Control-Allow-Headers",
     "Origin, X-Requested-With, Content-Type, Accept, Authorization"
@@ -58,6 +59,7 @@ app.use("/api/lectures", lectureRoutes);
 app.use("/api/enrollments", enrollmentRoutes);
 app.use("/api/comments", commentRoutes);
 app.use("/api/deposit-requests", depositRequestRoutes);
+app.use("/api/topics", topicRoutes);
 
 // Handle 404 error
 app.use((req: Request, res: Response, next: NextFunction) => {

@@ -2,22 +2,23 @@ export enum ROLES {
   ADMIN = "admin",
   LEARNER = "learner",
 }
-
 export enum STATUSES {
   PENDING = "pending",
   CONFIRM = "confirmed",
   DENIED = "denied",
 }
-export enum COURSE_TYPE {
-  THEORY = "theory",
-  EXAMINATION_SOLVING = "examination solving",
-}
 export enum GRADES {
+  TNTHPT = "tốt nghiệp THPT",
   TWELFTH = "12",
   ELEVENTH = "11",
   TENTH = "10",
+  NINTH = "9",
 }
-
+export enum TOPICS {
+  ALGEBRA = "algebra",
+  GEOMETRY = "geometry",
+  COMBINATION = "combination",
+}
 export interface User {
   id: string;
   email: string;
@@ -35,7 +36,6 @@ export interface Course {
   title: string;
   courseDescription: string;
   price: number;
-  courseType: COURSE_TYPE;
   grade: GRADES;
   learnerCount: number;
   sectionCount: number;
@@ -101,6 +101,15 @@ export interface Video {
   fileName: string;
   length: number;
   size: number;
+  isHidden: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+export interface Topic {
+  id: string;
+  title: string;
+  fileUrl: string;
+  topicType: TOPICS;
   isHidden: boolean;
   createdAt: Date;
   updatedAt: Date;
