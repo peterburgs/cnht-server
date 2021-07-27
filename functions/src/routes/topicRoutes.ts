@@ -84,7 +84,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
       const topicTitle = req.query.topicTitle;
       const topicType = req.query.topicType;
       if (topicId) {
-        topics = topics.filter((topic) => topic.topicId === topicId);
+        topics = topics.filter((topic) => topic.id === topicId);
       }
       if (topicTitle) {
         topics = topics.filter((topic) =>

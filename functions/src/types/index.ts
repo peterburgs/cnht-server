@@ -60,6 +60,7 @@ export interface Lecture {
   title: string;
   sectionId: string;
   lectureOrder: number;
+  note: string;
   isHidden: boolean;
   createdAt: Date;
   updatedAt: Date;
