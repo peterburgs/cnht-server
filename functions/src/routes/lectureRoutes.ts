@@ -53,6 +53,7 @@ router.post(
             title: req.body.title,
             sectionId: req.body.sectionId,
             lectureOrder: course.lectureCount,
+            note: "",
             isHidden: false,
             createdAt: createdAt,
             updatedAt: updatedAt,
@@ -66,6 +67,7 @@ router.post(
                 title: req.body.title,
                 sectionId: req.body.sectionId,
                 lectureOrder: course.lectureCount,
+                note: req.body.note,
                 isHidden: false,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -164,11 +166,13 @@ router.put(
           const lecture = snapshot.docs[0].data();
           await db.collection("lectures").doc(lecture.id).update({
             title: req.body.title,
+            note: req.body.note,
             updatedAt: updatedAt,
           });
           lecture.title = req.body.title;
           lecture.sectionId = req.body.sectionId;
           lecture.lectureOrder = req.body.lectureOrder;
+          lecture.note = req.body.note;
           lecture.updatedAt = updatedAt;
           res.status(200).json({
             message: "Update lecture successfully",
@@ -236,7 +240,11 @@ router.delete(
 const googleAuth = async (token: string) => {
   const ticket = await client.verifyIdToken({
     idToken: token,
-    audience: [process.env.CLIENT_ID!, process.env.LOCAL_CLIENT_ID!],
+    audience: [
+      process.env.CLIENT_ID!,
+      process.env.LOCAL_CLIENT_ID!,
+      process.env.DEV_CLIENT_ID!,
+    ],
   });
   return ticket.getPayload();
 };

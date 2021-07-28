@@ -278,6 +278,7 @@ router.post(
               .doc(topicId)
               .update({
                 fileUrl: `/api/topics/files/${_id}.${extension}`,
+                fileName: fileName,
                 updatedAt: momentFormat(),
               });
             if (updatedTopic) {

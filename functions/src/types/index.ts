@@ -110,6 +110,7 @@ export interface Topic {
   id: string;
   title: string;
   fileUrl: string;
+  fileName: string;
   topicType: TOPICS;
   isHidden: boolean;
   createdAt: Date;
