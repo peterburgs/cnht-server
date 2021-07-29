@@ -4,7 +4,7 @@ import { ROLES } from "../types";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import { v4 as uuidv4 } from "uuid";
-import { auth, OAuth2Client } from "google-auth-library";
+import { OAuth2Client } from "google-auth-library";
 import { Storage } from "@google-cloud/storage";
 import path from "path";
 import moment from "moment";
@@ -240,11 +240,7 @@ router.delete(
 const googleAuth = async (token: string) => {
   const ticket = await client.verifyIdToken({
     idToken: token,
-    audience: [
-      process.env.CLIENT_ID!,
-      process.env.LOCAL_CLIENT_ID!,
-      process.env.DEV_CLIENT_ID!,
-    ],
+    audience: [process.env.CLIENT_ID!],
   });
   return ticket.getPayload();
 };

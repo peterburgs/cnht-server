@@ -7,11 +7,7 @@ import { log } from "../utils";
 const googleAuth = async (token: string) => {
   const ticket = await client.verifyIdToken({
     idToken: token,
-    audience: [
-      process.env.CLIENT_ID!,
-      process.env.LOCAL_CLIENT_ID!,
-      process.env.DEV_CLIENT_ID!,
-    ],
+    audience: [process.env.CLIENT_ID!],
   });
   return ticket.getPayload();
 };

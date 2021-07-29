@@ -1,6 +1,6 @@
 import express, { Router, Request, Response, NextFunction } from "express";
 import { log, momentFormat } from "../utils";
-import { Lecture, ROLES, Course, Section, Video } from "../types";
+import { Lecture, ROLES, Video } from "../types";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import { v4 as uuidv4 } from "uuid";
@@ -108,7 +108,6 @@ router.post(
           title: req.body.title,
           courseDescription: req.body.courseDescription,
           price: req.body.price,
-          courseType: req.body.courseType,
           grade: req.body.grade,
           isPublished: req.body.isPublished,
           learnerCount: 0,
@@ -128,7 +127,6 @@ router.post(
               title: req.body.title,
               courseDescription: req.body.courseDescription,
               price: req.body.price,
-              courseType: req.body.courseType,
               grade: req.body.grade,
               isPublished: req.body.isPublished,
               learnerCount: 0,
@@ -232,7 +230,6 @@ router.put(
             title: req.body.title,
             courseDescription: req.body.courseDescription,
             price: req.body.price,
-            courseType: req.body.courseType,
             grade: req.body.grade,
             isPublished: req.body.isPublished,
             updatedAt: updatedAt,
@@ -242,7 +239,6 @@ router.put(
           course.title = req.body.title;
           course.courseDescription = req.body.courseDescription;
           course.price = req.body.price;
-          course.courseType = req.body.courseType;
           course.grade = req.body.grade;
           course.isPublished = req.body.isPublished;
           res.status(200).json({
@@ -352,10 +348,6 @@ router.get("/:courseId/lectures", async (req, res, next) => {
             lectures = lectures.concat(
               l.docs.map((singleLecture) => singleLecture.data() as Lecture)
             );
-          } else {
-            res.status(404).json({
-              message: "Cannot find section",
-            });
           }
         }
         if (lectures.length) {
@@ -395,6 +387,8 @@ router.get("/:courseId/lectures", async (req, res, next) => {
 
 // GET method: estimate course pricing
 router.get("/:courseId/pricing", async (req, res, next) => {
+  const scala = 23500 / (1024 * 1024 * 1024);
+  let totalBytes = 0;
   const courseId = req.params.courseId;
   const courseSnapshot = await db
     .collection("courses")
@@ -437,24 +431,15 @@ router.get("/:courseId/pricing", async (req, res, next) => {
                   price: 0,
                 });
               }
-              const totalBytes = _videos.reduce((e, i) => e + i.size, 0);
-              const scala = (2 * 23500) / (1024 * 1024 * 1024);
-              res.status(200).json({
-                message: log("Get estimated pricing successfully"),
-                price: Math.floor(totalBytes * scala),
-              });
-            } else {
-              res.status(404).json({
-                message: "Cannot find video",
-              });
+              totalBytes += _videos.reduce((e, i) => e + i.size, 0);
             }
           }
-        } else {
-          res.status(404).json({
-            message: "Cannot find lectures",
-          });
         }
       }
+      res.status(200).json({
+        message: log("Get estimated pricing successfully"),
+        price: Math.floor(totalBytes * scala),
+      });
     } else {
       res.status(404).json({
         message: log("Sections not found"),
