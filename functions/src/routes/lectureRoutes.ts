@@ -7,9 +7,8 @@ import { v4 as uuidv4 } from "uuid";
 import { OAuth2Client } from "google-auth-library";
 import { Storage } from "@google-cloud/storage";
 import path from "path";
-import moment from "moment";
 import db from "../database/firestoreConnection";
-
+import moment from "moment-timezone";
 const client = new OAuth2Client(process.env.CLIENT_ID);
 
 // Define router
@@ -442,9 +441,12 @@ router.get("/:lectureId/video/streaming", async (req, res, next) => {
                   const config = {
                     action: "read" as const,
                     expires: moment(new Date())
+                      .tz("Asia/Ho_Chi_Minh")
                       .add(1, "day")
                       .format("MM-DD-YYYY"),
-                    accessibleAt: moment(new Date()).format("MM-DD-YYYY"),
+                    accessibleAt: moment(new Date())
+                      .tz("Asia/Ho_Chi_Minh")
+                      .format("MM-DD-YYYY"),
                   };
                   file.getSignedUrl(config, (error, url) => {
                     if (error) {
@@ -483,9 +485,12 @@ router.get("/:lectureId/video/streaming", async (req, res, next) => {
                 const config = {
                   action: "read" as const,
                   expires: moment(new Date())
+                    .tz("Asia/Ho_Chi_Minh")
                     .add(1, "day")
                     .format("MM-DD-YYYY"),
-                  accessibleAt: moment(new Date()).format("MM-DD-YYYY"),
+                  accessibleAt: moment(new Date())
+                    .tz("Asia/Ho_Chi_Minh")
+                    .format("MM-DD-YYYY"),
                 };
                 file.getSignedUrl(config, (error, url) => {
                   if (error) {

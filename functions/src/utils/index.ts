@@ -1,13 +1,15 @@
-import moment from "moment";
+import moment from "moment-timezone";
 
+export function momentFormat() {
+  return moment(new Date())
+    .tz("Asia/Ho_Chi_Minh")
+    .format("YYYY/MM/DD HH:mm:ss");
+}
 export function log(message: string) {
   let res = "🔥🔥🔥🔥🔥🔥🔥🔥🔥";
-  const currentTime = moment(new Date()).format("HH:MM:SS");
+
   console.log("\n" + res);
-  console.log("[" + currentTime + "]: " + message);
+  console.log("[" + momentFormat() + "]: " + message);
   console.log(res + "\n");
   return message;
-}
-export function momentFormat() {
-  return moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
 }

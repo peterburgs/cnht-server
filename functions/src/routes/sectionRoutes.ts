@@ -5,7 +5,6 @@ import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import db from "../database/firestoreConnection";
 import { v4 as uuidv4 } from "uuid";
-import moment from "moment";
 
 // Define router
 const router: Router = express.Router();

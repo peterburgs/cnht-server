@@ -7,7 +7,6 @@ import { v4 as uuidv4 } from "uuid";
 import { Storage } from "@google-cloud/storage";
 import path from "path";
 import db from "../database/firestoreConnection";
-import moment from "moment";
 
 // Define router
 const router: Router = express.Router();
@@ -137,7 +136,7 @@ router.put(
           .where("id", "==", topicId)
           .get();
         if (snapshot.docs.length) {
-          const updatedAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
+          const updatedAt = momentFormat();
           const update = await db.collection("topics").doc(topicId).update({
             title: req.body.title,
             fileUrl: req.body.fileUrl,
@@ -194,7 +193,7 @@ router.delete(
           .where("id", "==", topicId)
           .get();
         if (snapshot.docs.length) {
-          const updatedAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
+          const updatedAt = momentFormat();
           const deletedTopic = await db
             .collection("topics")
             .doc(topicId)

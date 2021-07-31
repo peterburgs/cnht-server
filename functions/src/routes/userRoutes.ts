@@ -1,10 +1,9 @@
 import express, { Router, Request, Response, NextFunction } from "express";
-import { log } from "../utils";
+import { log, momentFormat } from "../utils";
 import { ROLES, User } from "../types";
 import requireAuth from "../middleware/requireAuth";
 import requireRole from "../middleware/requireRole";
 import db from "../database/firestoreConnection";
-import moment from "moment";
 const router: Router = express.Router();
 
 router.use(requireAuth);
@@ -63,7 +62,7 @@ router.put("/:id", async (req: Request, res: Response, next: NextFunction) => {
           .collection("users")
           .where("id", "==", id)
           .get();
-        const updatedAt = moment(new Date()).format("YYYY/MM/DD HH:mm:ss");
+        const updatedAt = momentFormat();
         if (snapshot.docs[0].exists) {
           await db.collection("users").doc(`${id}`).update({
             balance: req.body.balance,
